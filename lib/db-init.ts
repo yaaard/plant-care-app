@@ -3,6 +3,26 @@ import { getDatabase } from '@/lib/db';
 
 let initializationPromise: Promise<void> | null = null;
 
+async function ensurePlantColumns() {
+  const database = await getDatabase();
+  const columns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(plants)');
+  const columnNames = new Set(columns.map((column) => column.name));
+
+  const nextColumns = [
+    { name: 'lightCondition', sql: 'ALTER TABLE plants ADD COLUMN lightCondition TEXT NOT NULL DEFAULT \'\'' },
+    { name: 'humidityCondition', sql: 'ALTER TABLE plants ADD COLUMN humidityCondition TEXT NOT NULL DEFAULT \'\'' },
+    { name: 'roomTemperature', sql: 'ALTER TABLE plants ADD COLUMN roomTemperature TEXT NOT NULL DEFAULT \'\'' },
+    { name: 'conditionTags', sql: 'ALTER TABLE plants ADD COLUMN conditionTags TEXT NOT NULL DEFAULT \'[]\'' },
+    { name: 'customCareComment', sql: 'ALTER TABLE plants ADD COLUMN customCareComment TEXT NOT NULL DEFAULT \'\'' },
+  ];
+
+  for (const column of nextColumns) {
+    if (!columnNames.has(column.name)) {
+      await database.execAsync(column.sql);
+    }
+  }
+}
+
 export async function initializeDatabase(): Promise<void> {
   if (!initializationPromise) {
     initializationPromise = (async () => {
@@ -19,6 +39,11 @@ export async function initializeDatabase(): Promise<void> {
           lastWateringDate TEXT,
           wateringIntervalDays INTEGER NOT NULL,
           notes TEXT NOT NULL DEFAULT '',
+          lightCondition TEXT NOT NULL DEFAULT '',
+          humidityCondition TEXT NOT NULL DEFAULT '',
+          roomTemperature TEXT NOT NULL DEFAULT '',
+          conditionTags TEXT NOT NULL DEFAULT '[]',
+          customCareComment TEXT NOT NULL DEFAULT '',
           createdAt TEXT NOT NULL,
           updatedAt TEXT NOT NULL
         );
@@ -61,6 +86,8 @@ export async function initializeDatabase(): Promise<void> {
         ON care_tasks(plantId, type, scheduledDate)
         WHERE isCompleted = 0;
       `);
+
+      await ensurePlantColumns();
 
       await database.runAsync(
         `

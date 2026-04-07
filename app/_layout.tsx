@@ -69,6 +69,10 @@ export default function RootLayout() {
         <Stack.Screen name="plant/add" options={{ title: 'Добавить растение' }} />
         <Stack.Screen name="plant/[id]" options={{ title: 'Карточка растения' }} />
         <Stack.Screen name="plant/edit/[id]" options={{ title: 'Редактировать растение' }} />
+        <Stack.Screen
+          name="plant/recommendations/[id]"
+          options={{ title: 'Рекомендации по уходу' }}
+        />
         <Stack.Screen name="task/[id]" options={{ title: 'Задача' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Информация' }} />
       </Stack>

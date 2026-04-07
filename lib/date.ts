@@ -1,4 +1,5 @@
 const DATE_REGEXP = /^\d{4}-\d{2}-\d{2}$/;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 function pad(value: number) {
   return String(value).padStart(2, '0');
@@ -34,6 +35,20 @@ export function addDays(dateString: string, days: number): string {
 
 export function compareDateStrings(left: string, right: string): number {
   return parseDateString(left).getTime() - parseDateString(right).getTime();
+}
+
+export function differenceInDays(laterDate: string, earlierDate: string): number {
+  return Math.round(
+    (parseDateString(laterDate).getTime() - parseDateString(earlierDate).getTime()) / DAY_IN_MS
+  );
+}
+
+export function getDaysSince(dateString: string | null): number | null {
+  if (!dateString || !isValidDateString(dateString)) {
+    return null;
+  }
+
+  return differenceInDays(todayString(), dateString);
 }
 
 export function isDateBeforeToday(value: string): boolean {

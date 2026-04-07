@@ -40,7 +40,7 @@ export function CareTaskCard({
 
       {showPlantName && hasPlantInfo(task) ? (
         <Text style={styles.plantName}>
-          {task.plantName} • {task.plantSpecies}
+          {task.plantName} - {task.plantSpecies}
         </Text>
       ) : null}
 

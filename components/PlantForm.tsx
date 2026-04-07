@@ -10,13 +10,20 @@ import {
   View,
 } from 'react-native';
 
-import { DEFAULT_PLANT_FORM_VALUES } from '@/constants/defaultValues';
 import { EmptyState } from '@/components/EmptyState';
 import { FormField } from '@/components/FormField';
+import { TagSelector } from '@/components/TagSelector';
+import {
+  CONDITION_TAG_OPTIONS,
+  HUMIDITY_CONDITION_OPTIONS,
+  LIGHT_CONDITION_OPTIONS,
+  PLANT_GUIDE,
+} from '@/constants/plantGuide';
+import { DEFAULT_PLANT_FORM_VALUES } from '@/constants/defaultValues';
 import { todayString } from '@/lib/date';
 import { pickImageFromLibraryAsync } from '@/lib/image-picker';
 import { normalizePlantFormValues, validatePlantForm } from '@/lib/validators';
-import type { PlantFormValues } from '@/types/plant';
+import type { PlantConditionTag, PlantFormValues } from '@/types/plant';
 
 type PlantFormProps = {
   initialValues?: PlantFormValues;
@@ -25,6 +32,45 @@ type PlantFormProps = {
   errorMessage?: string | null;
   onSubmit: (values: PlantFormValues) => Promise<void> | void;
 };
+
+function SelectionGroup({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: readonly string[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <View style={styles.groupBlock}>
+      <Text style={styles.groupLabel}>{label}</Text>
+      <View style={styles.optionsWrap}>
+        {options.map((option) => {
+          const selected = value === option;
+
+          return (
+            <Pressable
+              key={option}
+              onPress={() => onChange(option)}
+              style={({ pressed }) => [
+                styles.optionChip,
+                selected && styles.optionChipSelected,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.optionChipText, selected && styles.optionChipTextSelected]}>
+                {option}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
 
 export function PlantForm({
   initialValues = DEFAULT_PLANT_FORM_VALUES,
@@ -41,6 +87,13 @@ export function PlantForm({
     String(initialValues.wateringIntervalDays)
   );
   const [notes, setNotes] = useState(initialValues.notes);
+  const [lightCondition, setLightCondition] = useState(initialValues.lightCondition);
+  const [humidityCondition, setHumidityCondition] = useState(initialValues.humidityCondition);
+  const [roomTemperature, setRoomTemperature] = useState(initialValues.roomTemperature);
+  const [conditionTags, setConditionTags] = useState<PlantConditionTag[]>(
+    initialValues.conditionTags
+  );
+  const [customCareComment, setCustomCareComment] = useState(initialValues.customCareComment);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   useEffect(() => {
@@ -50,6 +103,12 @@ export function PlantForm({
     setLastWateringDate(initialValues.lastWateringDate ?? '');
     setWateringIntervalDays(String(initialValues.wateringIntervalDays));
     setNotes(initialValues.notes);
+    setLightCondition(initialValues.lightCondition);
+    setHumidityCondition(initialValues.humidityCondition);
+    setRoomTemperature(initialValues.roomTemperature);
+    setConditionTags(initialValues.conditionTags);
+    setCustomCareComment(initialValues.customCareComment);
+    setValidationErrors([]);
   }, [initialValues]);
 
   const handlePickPhoto = async () => {
@@ -57,6 +116,16 @@ export function PlantForm({
 
     if (selectedUri) {
       setPhotoUri(selectedUri);
+    }
+  };
+
+  const handleGuideSpeciesSelect = (guideName: string) => {
+    setSpecies(guideName);
+
+    const guideEntry = PLANT_GUIDE.find((item) => item.name === guideName);
+
+    if (guideEntry) {
+      setWateringIntervalDays(String(guideEntry.recommendedWateringIntervalDays));
     }
   };
 
@@ -68,6 +137,11 @@ export function PlantForm({
       lastWateringDate,
       wateringIntervalDays: Number(wateringIntervalDays),
       notes,
+      lightCondition,
+      humidityCondition,
+      roomTemperature,
+      conditionTags,
+      customCareComment,
     });
 
     const errors = validatePlantForm(values);
@@ -128,17 +202,47 @@ export function PlantForm({
 
         <FormField
           autoCapitalize="words"
-          label="Название"
+          label="Название растения"
           onChangeText={setName}
-          placeholder="Например, Фикус"
+          placeholder="Например, Зелёный уголок"
           value={name}
         />
 
+        <View style={styles.guideCard}>
+          <Text style={styles.guideTitle}>Вид из локального справочника</Text>
+          <Text style={styles.guideSubtitle}>
+            Можно выбрать готовый вариант, а затем при необходимости скорректировать интервал
+            полива вручную.
+          </Text>
+
+          <View style={styles.optionsWrap}>
+            {PLANT_GUIDE.map((item) => {
+              const selected = species === item.name;
+
+              return (
+                <Pressable
+                  key={item.id}
+                  onPress={() => handleGuideSpeciesSelect(item.name)}
+                  style={({ pressed }) => [
+                    styles.optionChip,
+                    selected && styles.optionChipSelected,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={[styles.optionChipText, selected && styles.optionChipTextSelected]}>
+                    {item.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
         <FormField
           autoCapitalize="words"
-          label="Вид"
+          label="Вид растения"
           onChangeText={setSpecies}
-          placeholder="Например, Ficus elastica"
+          placeholder="Например, Монстера"
           value={species}
         />
 
@@ -165,11 +269,50 @@ export function PlantForm({
           value={wateringIntervalDays}
         />
 
+        <SelectionGroup
+          label="Текущее освещение"
+          onChange={setLightCondition}
+          options={LIGHT_CONDITION_OPTIONS}
+          value={lightCondition}
+        />
+
+        <SelectionGroup
+          label="Текущая влажность воздуха"
+          onChange={setHumidityCondition}
+          options={HUMIDITY_CONDITION_OPTIONS}
+          value={humidityCondition}
+        />
+
         <FormField
-          label="Заметки"
+          label="Температура в комнате"
+          onChangeText={setRoomTemperature}
+          placeholder="Например, 22°C"
+          value={roomTemperature}
+        />
+
+        <View style={styles.groupBlock}>
+          <Text style={styles.groupLabel}>Признаки состояния растения</Text>
+          <Text style={styles.groupHelper}>Отметьте только то, что действительно наблюдаете сейчас.</Text>
+          <TagSelector
+            onChange={setConditionTags}
+            options={CONDITION_TAG_OPTIONS}
+            selectedTags={conditionTags}
+          />
+        </View>
+
+        <FormField
+          label="Дополнительный комментарий для анализа"
+          multiline
+          onChangeText={setCustomCareComment}
+          placeholder="Например, растение стоит у батареи или недавно было переставлено."
+          value={customCareComment}
+        />
+
+        <FormField
+          label="Общие заметки"
           multiline
           onChangeText={setNotes}
-          placeholder="Свет, влажность, особенности ухода..."
+          placeholder="Свет, режим ухода, напоминания для себя."
           value={notes}
         />
 
@@ -177,7 +320,7 @@ export function PlantForm({
           <View style={styles.errorBox}>
             {validationErrors.map((error) => (
               <Text key={error} style={styles.errorText}>
-                • {error}
+                - {error}
               </Text>
             ))}
           </View>
@@ -198,9 +341,7 @@ export function PlantForm({
             loading && styles.disabledButton,
           ]}
         >
-          <Text style={styles.primaryButtonText}>
-            {loading ? 'Сохранение...' : submitLabel}
-          </Text>
+          <Text style={styles.primaryButtonText}>{loading ? 'Сохранение...' : submitLabel}</Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -269,6 +410,66 @@ const styles = StyleSheet.create({
   },
   secondaryDangerButtonText: {
     color: '#c2410c',
+  },
+  guideCard: {
+    backgroundColor: '#ffffff',
+    borderColor: '#d5ddd2',
+    borderRadius: 18,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 16,
+  },
+  guideTitle: {
+    color: '#163020',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  guideSubtitle: {
+    color: '#667085',
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+  optionsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  optionChip: {
+    backgroundColor: '#ffffff',
+    borderColor: '#d5ddd2',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  optionChipSelected: {
+    backgroundColor: '#edf7ef',
+    borderColor: '#2f6f3e',
+  },
+  optionChipText: {
+    color: '#435249',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  optionChipTextSelected: {
+    color: '#2f6f3e',
+  },
+  groupBlock: {
+    marginBottom: 16,
+  },
+  groupLabel: {
+    color: '#163020',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  groupHelper: {
+    color: '#667085',
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 8,
   },
   linkButton: {
     alignSelf: 'flex-start',

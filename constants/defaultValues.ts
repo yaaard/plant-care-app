@@ -13,6 +13,11 @@ export const DEFAULT_PLANT_FORM_VALUES: PlantFormValues = {
   lastWateringDate: null,
   wateringIntervalDays: DEFAULT_WATERING_INTERVAL_DAYS,
   notes: '',
+  lightCondition: '',
+  humidityCondition: '',
+  roomTemperature: '',
+  conditionTags: [],
+  customCareComment: '',
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {

@@ -38,7 +38,7 @@ export default function PlantsScreen() {
         ListEmptyComponent={
           <EmptyState
             actionLabel="Добавить растение"
-            description="Создайте первую карточку, чтобы хранить поливы, задачи и заметки локально на устройстве."
+            description="Создайте первую карточку, чтобы хранить поливы, задачи, заметки и рекомендации локально на устройстве."
             onActionPress={() => router.push('/plant/add' as Href)}
             title="Пока нет растений"
           />

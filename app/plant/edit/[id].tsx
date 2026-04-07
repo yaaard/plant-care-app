@@ -7,7 +7,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { PlantForm } from '@/components/PlantForm';
 import { getPlantById, updatePlant } from '@/lib/plants-repo';
 import { getErrorMessage } from '@/lib/validators';
-import type { PlantFormValues } from '@/types/plant';
+import { parseConditionTags, type PlantFormValues } from '@/types/plant';
 
 function normalizeParam(value: string | string[] | undefined) {
   if (Array.isArray(value)) {
@@ -50,6 +50,11 @@ export default function EditPlantScreen() {
           lastWateringDate: plant.lastWateringDate,
           wateringIntervalDays: plant.wateringIntervalDays,
           notes: plant.notes,
+          lightCondition: plant.lightCondition,
+          humidityCondition: plant.humidityCondition,
+          roomTemperature: plant.roomTemperature,
+          conditionTags: parseConditionTags(plant.conditionTags),
+          customCareComment: plant.customCareComment,
         });
         setErrorMessage(null);
       }

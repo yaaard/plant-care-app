@@ -11,7 +11,29 @@ import {
   getPendingTasks,
   replaceActiveWateringTaskForPlant,
 } from '@/lib/tasks-repo';
-import type { Plant, PlantFormValues, PlantListItem } from '@/types/plant';
+import {
+  serializeConditionTags,
+  type Plant,
+  type PlantFormValues,
+  type PlantListItem,
+} from '@/types/plant';
+
+const PLANT_SELECT_COLUMNS = `
+  id,
+  name,
+  species,
+  photoUri,
+  lastWateringDate,
+  wateringIntervalDays,
+  notes,
+  lightCondition,
+  humidityCondition,
+  roomTemperature,
+  conditionTags,
+  customCareComment,
+  createdAt,
+  updatedAt
+`;
 
 export async function getPlants(): Promise<Plant[]> {
   await initializeDatabase();
@@ -20,15 +42,7 @@ export async function getPlants(): Promise<Plant[]> {
   return database.getAllAsync<Plant>(
     `
       SELECT
-        id,
-        name,
-        species,
-        photoUri,
-        lastWateringDate,
-        wateringIntervalDays,
-        notes,
-        createdAt,
-        updatedAt
+        ${PLANT_SELECT_COLUMNS}
       FROM plants
       ORDER BY name COLLATE NOCASE ASC, createdAt DESC
     `
@@ -42,15 +56,7 @@ export async function getPlantById(id: string): Promise<Plant | null> {
   return database.getFirstAsync<Plant>(
     `
       SELECT
-        id,
-        name,
-        species,
-        photoUri,
-        lastWateringDate,
-        wateringIntervalDays,
-        notes,
-        createdAt,
-        updatedAt
+        ${PLANT_SELECT_COLUMNS}
       FROM plants
       WHERE id = ?
       LIMIT 1
@@ -82,23 +88,31 @@ export async function getPlantListItems(): Promise<PlantListItem[]> {
   });
 }
 
-export async function createPlant(values: PlantFormValues): Promise<Plant> {
-  await initializeDatabase();
-  const database = await getDatabase();
-  const timestamp = nowIsoString();
-
-  const plant: Plant = {
-    id: createId('plant'),
+function buildPlantRecord(values: PlantFormValues, id: string, createdAt: string, updatedAt: string): Plant {
+  return {
+    id,
     name: values.name,
     species: values.species,
     photoUri: values.photoUri,
     lastWateringDate: values.lastWateringDate,
     wateringIntervalDays: values.wateringIntervalDays,
     notes: values.notes,
-    createdAt: timestamp,
-    updatedAt: timestamp,
+    lightCondition: values.lightCondition,
+    humidityCondition: values.humidityCondition,
+    roomTemperature: values.roomTemperature,
+    conditionTags: serializeConditionTags(values.conditionTags),
+    customCareComment: values.customCareComment,
+    createdAt,
+    updatedAt,
   };
+}
 
+export async function createPlant(values: PlantFormValues): Promise<Plant> {
+  await initializeDatabase();
+  const database = await getDatabase();
+  const timestamp = nowIsoString();
+
+  const plant = buildPlantRecord(values, createId('plant'), timestamp, timestamp);
   const nextWateringDate = getNextWateringDate(
     plant.lastWateringDate,
     plant.wateringIntervalDays
@@ -115,9 +129,14 @@ export async function createPlant(values: PlantFormValues): Promise<Plant> {
           lastWateringDate,
           wateringIntervalDays,
           notes,
+          lightCondition,
+          humidityCondition,
+          roomTemperature,
+          conditionTags,
+          customCareComment,
           createdAt,
           updatedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       plant.id,
       plant.name,
@@ -126,6 +145,11 @@ export async function createPlant(values: PlantFormValues): Promise<Plant> {
       plant.lastWateringDate,
       plant.wateringIntervalDays,
       plant.notes,
+      plant.lightCondition,
+      plant.humidityCondition,
+      plant.roomTemperature,
+      plant.conditionTags,
+      plant.customCareComment,
       plant.createdAt,
       plant.updatedAt
     );
@@ -147,17 +171,7 @@ export async function updatePlant(id: string, values: PlantFormValues): Promise<
     return null;
   }
 
-  const updatedPlant: Plant = {
-    ...existingPlant,
-    name: values.name,
-    species: values.species,
-    photoUri: values.photoUri,
-    lastWateringDate: values.lastWateringDate,
-    wateringIntervalDays: values.wateringIntervalDays,
-    notes: values.notes,
-    updatedAt: nowIsoString(),
-  };
-
+  const updatedPlant = buildPlantRecord(values, id, existingPlant.createdAt, nowIsoString());
   const nextWateringDate = getNextWateringDate(
     updatedPlant.lastWateringDate,
     updatedPlant.wateringIntervalDays
@@ -174,6 +188,11 @@ export async function updatePlant(id: string, values: PlantFormValues): Promise<
           lastWateringDate = ?,
           wateringIntervalDays = ?,
           notes = ?,
+          lightCondition = ?,
+          humidityCondition = ?,
+          roomTemperature = ?,
+          conditionTags = ?,
+          customCareComment = ?,
           updatedAt = ?
         WHERE id = ?
       `,
@@ -183,6 +202,11 @@ export async function updatePlant(id: string, values: PlantFormValues): Promise<
       updatedPlant.lastWateringDate,
       updatedPlant.wateringIntervalDays,
       updatedPlant.notes,
+      updatedPlant.lightCondition,
+      updatedPlant.humidityCondition,
+      updatedPlant.roomTemperature,
+      updatedPlant.conditionTags,
+      updatedPlant.customCareComment,
       updatedPlant.updatedAt,
       updatedPlant.id
     );

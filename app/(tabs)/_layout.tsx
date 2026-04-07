@@ -1,6 +1,6 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { Ionicons } from '@expo/vector-icons';
 
 export default function TabLayout() {
   return (
@@ -31,6 +31,13 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons color={color} name="calendar-outline" size={size} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="guide"
+        options={{
+          title: 'Справочник',
+          tabBarIcon: ({ color, size }) => <Ionicons color={color} name="book-outline" size={size} />,
         }}
       />
       <Tabs.Screen

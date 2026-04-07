@@ -1,8 +1,8 @@
 import { ActivityIndicator, FlatList, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 
-import { CARE_TYPE_LABELS } from '@/constants/careTypes';
 import { EmptyState } from '@/components/EmptyState';
 import { SectionTitle } from '@/components/SectionTitle';
+import { CARE_TYPE_LABELS } from '@/constants/careTypes';
 import { useLogs } from '@/hooks/useLogs';
 
 export default function HistoryScreen() {
@@ -45,7 +45,7 @@ export default function HistoryScreen() {
           <View style={styles.card}>
             <Text style={styles.title}>{item.plantName}</Text>
             <Text style={styles.subtitle}>
-              {CARE_TYPE_LABELS[item.actionType]} • {item.actionDate}
+              {CARE_TYPE_LABELS[item.actionType]} - {item.actionDate}
             </Text>
             {item.comment ? <Text style={styles.comment}>{item.comment}</Text> : null}
           </View>

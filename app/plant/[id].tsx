@@ -1,5 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,17 +14,19 @@ import {
 } from 'react-native';
 import { Stack, type Href, useLocalSearchParams, useRouter } from 'expo-router';
 
-import { CARE_TYPE_LABELS } from '@/constants/careTypes';
 import { CareTaskCard } from '@/components/CareTaskCard';
 import { EmptyState } from '@/components/EmptyState';
 import { SectionTitle } from '@/components/SectionTitle';
+import { CARE_TYPE_LABELS } from '@/constants/careTypes';
+import { getConditionTagLabel, getPlantGuideEntryByName } from '@/constants/plantGuide';
 import { formatDateLabel, getNextWateringDate } from '@/lib/date';
 import { getLogsByPlantId } from '@/lib/logs-repo';
 import { deletePlant, getPlantById, markPlantAsWatered } from '@/lib/plants-repo';
+import { getRecommendationHighlights } from '@/lib/recommendations';
 import { getTasksByPlantId } from '@/lib/tasks-repo';
 import { getErrorMessage } from '@/lib/validators';
 import type { CareLog } from '@/types/log';
-import type { Plant } from '@/types/plant';
+import { parseConditionTags, type Plant } from '@/types/plant';
 import type { CareTask } from '@/types/task';
 
 function normalizeParam(value: string | string[] | undefined) {
@@ -136,6 +138,18 @@ export default function PlantDetailsScreen() {
   const nextWateringDate =
     tasks.find((task) => task.isCompleted === 0)?.scheduledDate ??
     (plant ? getNextWateringDate(plant.lastWateringDate, plant.wateringIntervalDays) : null);
+  const guideEntry = useMemo(
+    () => (plant ? getPlantGuideEntryByName(plant.species) : null),
+    [plant]
+  );
+  const recommendationHighlights = useMemo(
+    () => (plant ? getRecommendationHighlights(plant, guideEntry) : []),
+    [guideEntry, plant]
+  );
+  const conditionTags = useMemo(
+    () => (plant ? parseConditionTags(plant.conditionTags) : []),
+    [plant]
+  );
 
   if (loading && !plant) {
     return (
@@ -177,7 +191,7 @@ export default function PlantDetailsScreen() {
                   params: { id: plant.id },
                 } as unknown as Href)
               }
-              title="Ред."
+              title="Изм."
             />
           ),
         }}
@@ -195,6 +209,11 @@ export default function PlantDetailsScreen() {
         <View style={styles.card}>
           <Text style={styles.plantName}>{plant.name}</Text>
           <Text style={styles.plantSpecies}>{plant.species}</Text>
+          {guideEntry ? (
+            <Text style={styles.referenceText}>
+              Справочный режим: полив примерно раз в {guideEntry.recommendedWateringIntervalDays} дн.
+            </Text>
+          ) : null}
 
           <View style={styles.infoGrid}>
             <View style={styles.infoItem}>
@@ -213,10 +232,72 @@ export default function PlantDetailsScreen() {
             </View>
           </View>
 
+          <Text style={styles.notesLabel}>Условия в комнате</Text>
+          <View style={styles.infoGrid}>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Освещение</Text>
+              <Text style={styles.infoValue}>{formatDateLabel(plant.lightCondition || null)}</Text>
+            </View>
+
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Влажность</Text>
+              <Text style={styles.infoValue}>
+                {formatDateLabel(plant.humidityCondition || null)}
+              </Text>
+            </View>
+
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Температура</Text>
+              <Text style={styles.infoValue}>
+                {formatDateLabel(plant.roomTemperature || null)}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.notesLabel}>Признаки состояния</Text>
+          {conditionTags.length > 0 ? (
+            <View style={styles.tagWrap}>
+              {conditionTags.map((tag) => (
+                <View key={tag} style={styles.tag}>
+                  <Text style={styles.tagText}>{getConditionTagLabel(tag)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.notesValue}>Пока не отмечены.</Text>
+          )}
+
+          <Text style={styles.notesLabel}>Комментарий для анализа</Text>
+          <Text style={styles.notesValue}>
+            {plant.customCareComment || 'Пока нет дополнительного комментария.'}
+          </Text>
+
           <Text style={styles.notesLabel}>Заметки</Text>
           <Text style={styles.notesValue}>
             {plant.notes || 'Пока нет дополнительных заметок.'}
           </Text>
+        </View>
+
+        <View style={[styles.card, styles.recommendationCard]}>
+          <Text style={styles.notesLabel}>Краткая рекомендация</Text>
+          {recommendationHighlights.map((item) => (
+            <Text key={item} style={styles.highlightText}>
+              - {item}
+            </Text>
+          ))}
+
+          <Pressable
+            disabled={busy}
+            onPress={() =>
+              router.push({
+                pathname: '/plant/recommendations/[id]',
+                params: { id: plant.id },
+              } as unknown as Href)
+            }
+            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.secondaryButtonText}>Рекомендации</Text>
+          </Pressable>
         </View>
 
         <View style={styles.actionsRow}>
@@ -282,7 +363,7 @@ export default function PlantDetailsScreen() {
           logs.map((log) => (
             <View key={log.id} style={styles.logCard}>
               <Text style={styles.logTitle}>
-                {CARE_TYPE_LABELS[log.actionType]} • {log.actionDate}
+                {CARE_TYPE_LABELS[log.actionType]} - {log.actionDate}
               </Text>
               <Text style={styles.logComment}>
                 {log.comment || 'Комментарий не указан.'}
@@ -351,6 +432,12 @@ const styles = StyleSheet.create({
   plantSpecies: {
     color: '#667085',
     fontSize: 15,
+    marginBottom: 8,
+  },
+  referenceText: {
+    color: '#2f6f3e',
+    fontSize: 13,
+    lineHeight: 19,
     marginBottom: 18,
   },
   infoGrid: {
@@ -382,6 +469,32 @@ const styles = StyleSheet.create({
     color: '#163020',
     fontSize: 15,
     lineHeight: 22,
+    marginBottom: 18,
+  },
+  tagWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 18,
+  },
+  tag: {
+    backgroundColor: '#edf7ef',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  tagText: {
+    color: '#2f6f3e',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  recommendationCard: {
+    gap: 8,
+  },
+  highlightText: {
+    color: '#163020',
+    fontSize: 14,
+    lineHeight: 21,
   },
   actionsRow: {
     gap: 12,

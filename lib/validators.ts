@@ -1,7 +1,25 @@
 import { DEFAULT_SETTINGS } from '@/constants/defaultValues';
 import { isValidDateString } from '@/lib/date';
-import type { PlantFormValues } from '@/types/plant';
+import {
+  PLANT_CONDITION_TAG_VALUES,
+  type PlantConditionTag,
+  type PlantFormValues,
+} from '@/types/plant';
 import type { AppSettings, SettingsFormValues } from '@/types/settings';
+
+function normalizeTagList(tags: PlantConditionTag[]): PlantConditionTag[] {
+  const uniqueTags = Array.from(
+    new Set(
+      tags.filter((tag): tag is PlantConditionTag => PLANT_CONDITION_TAG_VALUES.includes(tag))
+    )
+  );
+
+  if (uniqueTags.includes('healthy') && uniqueTags.length > 1) {
+    return uniqueTags.filter((tag) => tag !== 'healthy');
+  }
+
+  return uniqueTags;
+}
 
 export function normalizePlantFormValues(values: PlantFormValues): PlantFormValues {
   return {
@@ -11,6 +29,11 @@ export function normalizePlantFormValues(values: PlantFormValues): PlantFormValu
     lastWateringDate: values.lastWateringDate?.trim() ? values.lastWateringDate.trim() : null,
     wateringIntervalDays: Math.floor(Number(values.wateringIntervalDays)),
     notes: values.notes.trim(),
+    lightCondition: values.lightCondition.trim(),
+    humidityCondition: values.humidityCondition.trim(),
+    roomTemperature: values.roomTemperature.trim(),
+    conditionTags: normalizeTagList(values.conditionTags),
+    customCareComment: values.customCareComment.trim(),
   };
 }
 
@@ -23,7 +46,7 @@ export function validatePlantForm(values: PlantFormValues): string[] {
   }
 
   if (!normalizedValues.species) {
-    errors.push('Укажите вид растения.');
+    errors.push('Укажите вид растения или выберите его из справочника.');
   }
 
   if (
