@@ -1,6 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
+import { subscribeToLocalDataChanges } from '@/lib/local-events';
 import { getPlantListItems } from '@/lib/plants-repo';
 import { getErrorMessage } from '@/lib/validators';
 import type { PlantListItem } from '@/types/plant';
@@ -29,6 +30,12 @@ export function usePlants() {
       void reload();
     }, [reload])
   );
+
+  useEffect(() => {
+    return subscribeToLocalDataChanges(() => {
+      void reload();
+    });
+  }, [reload]);
 
   return {
     plants,

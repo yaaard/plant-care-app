@@ -10,7 +10,7 @@ type FormFieldProps = {
   multiline?: boolean;
   keyboardType?: KeyboardTypeOptions;
   autoCapitalize?: TextInputProps['autoCapitalize'];
-} & Pick<TextInputProps, 'editable' | 'maxLength'>;
+} & Pick<TextInputProps, 'editable' | 'maxLength' | 'secureTextEntry'>;
 
 export function FormField({
   label,
@@ -23,6 +23,7 @@ export function FormField({
   autoCapitalize = 'sentences',
   editable = true,
   maxLength,
+  secureTextEntry,
 }: FormFieldProps) {
   return (
     <View style={styles.container}>
@@ -36,6 +37,7 @@ export function FormField({
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor="#8a948c"
+        secureTextEntry={secureTextEntry}
         style={[styles.input, multiline && styles.multilineInput, !editable && styles.disabledInput]}
         textAlignVertical={multiline ? 'top' : 'center'}
         value={value}

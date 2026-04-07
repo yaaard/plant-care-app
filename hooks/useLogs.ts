@@ -1,6 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
+import { subscribeToLocalDataChanges } from '@/lib/local-events';
 import { getLogs } from '@/lib/logs-repo';
 import { getErrorMessage } from '@/lib/validators';
 import type { CareLogWithPlant } from '@/types/log';
@@ -29,6 +30,12 @@ export function useLogs() {
       void reload();
     }, [reload])
   );
+
+  useEffect(() => {
+    return subscribeToLocalDataChanges(() => {
+      void reload();
+    });
+  }, [reload]);
 
   return {
     logs,

@@ -1,5 +1,9 @@
-import { Redirect, type Href } from 'expo-router';
+import { Redirect } from 'expo-router';
+
+import { useAuth } from '@/hooks/useAuth';
 
 export default function IndexScreen() {
-  return <Redirect href={'/(tabs)/plants' as Href} />;
+  const { user } = useAuth();
+
+  return <Redirect href={user ? '/(tabs)/plants' : '/(auth)/sign-in'} />;
 }

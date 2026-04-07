@@ -4,12 +4,15 @@ import { CARE_TYPE_DEFAULT_COMMENTS, CARE_TYPES } from '@/constants/careTypes';
 import { DEFAULT_RISK_LEVEL } from '@/constants/defaultValues';
 import { getPlantGuideEntryByName } from '@/constants/plantGuide';
 import { buildAdaptiveCarePlan } from '@/lib/care-plan';
-import { getNextWateringDate, isDateBeforeToday, todayString } from '@/lib/date';
+import { getNextWateringDate, isDateBeforeToday } from '@/lib/date';
 import { createId, getDatabase, nowIsoString } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
+import { emitLocalDataChanged } from '@/lib/local-events';
 import { addCareLog, getLogsByPlantId } from '@/lib/logs-repo';
 import { refreshScheduledNotificationsAsync } from '@/lib/notifications';
 import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
+import { getCurrentSupabaseUserIdAsync } from '@/lib/supabase';
+import { enqueueDeletion } from '@/lib/sync-queue';
 import {
   completeActiveTasksForPlantByType,
   completeTaskById,
@@ -33,6 +36,7 @@ const PLANT_SELECT_COLUMNS = `
   name,
   species,
   photoUri,
+  photoPath,
   lastWateringDate,
   wateringIntervalDays,
   notes,
@@ -43,6 +47,9 @@ const PLANT_SELECT_COLUMNS = `
   customCareComment,
   riskLevel,
   lastInspectionDate,
+  userId,
+  syncStatus,
+  remoteUpdatedAt,
   createdAt,
   updatedAt
 `;
@@ -62,8 +69,7 @@ async function getPlantByIdInternal(
 ): Promise<Plant | null> {
   return database.getFirstAsync<Plant>(
     `
-      SELECT
-        ${PLANT_SELECT_COLUMNS}
+      SELECT ${PLANT_SELECT_COLUMNS}
       FROM plants
       WHERE id = ?
       LIMIT 1
@@ -80,6 +86,10 @@ function buildPlantRecord(
     updatedAt: string;
     riskLevel: Plant['riskLevel'];
     lastInspectionDate: string | null;
+    photoPath: string | null;
+    userId: string | null;
+    syncStatus: Plant['syncStatus'];
+    remoteUpdatedAt: string | null;
   }
 ): Plant {
   return {
@@ -87,6 +97,7 @@ function buildPlantRecord(
     name: values.name,
     species: values.species,
     photoUri: values.photoUri,
+    photoPath: seed.photoPath,
     lastWateringDate: values.lastWateringDate,
     wateringIntervalDays: values.wateringIntervalDays,
     notes: values.notes,
@@ -97,6 +108,9 @@ function buildPlantRecord(
     customCareComment: values.customCareComment,
     riskLevel: seed.riskLevel,
     lastInspectionDate: seed.lastInspectionDate,
+    userId: seed.userId,
+    syncStatus: seed.syncStatus,
+    remoteUpdatedAt: seed.remoteUpdatedAt,
     createdAt: seed.createdAt,
     updatedAt: seed.updatedAt,
   };
@@ -119,15 +133,23 @@ async function syncPlantDerivedState(
   await replaceActiveTaskForPlantByType(
     plantId,
     CARE_TYPES.WATERING,
-    carePlan.taskDates[CARE_TYPES.WATERING] ?? getNextWateringDate(plant.lastWateringDate, plant.wateringIntervalDays),
-    database
+    carePlan.taskDates[CARE_TYPES.WATERING] ??
+      getNextWateringDate(plant.lastWateringDate, plant.wateringIntervalDays),
+    database,
+    plant.userId ?? null
   );
 
   for (const type of [CARE_TYPES.INSPECTION, CARE_TYPES.SPRAYING, CARE_TYPES.FERTILIZING] as const) {
     const scheduledDate = carePlan.taskDates[type];
 
     if (scheduledDate) {
-      await replaceActiveTaskForPlantByType(plantId, type, scheduledDate, database);
+      await replaceActiveTaskForPlantByType(
+        plantId,
+        type,
+        scheduledDate,
+        database,
+        plant.userId ?? null
+      );
     } else {
       await deleteActiveTasksForPlantByType(plantId, type, database);
     }
@@ -136,16 +158,24 @@ async function syncPlantDerivedState(
   const tasks = await getTasksByPlantId(plantId, database);
   const riskAssessment = buildPlantRiskAssessment(plant, tasks, logs, guideEntry);
 
-  await database.runAsync(
-    `
-      UPDATE plants
-      SET riskLevel = ?, updatedAt = ?
-      WHERE id = ?
-    `,
-    riskAssessment.riskLevel,
-    nowIsoString(),
-    plantId
-  );
+  if (riskAssessment.riskLevel !== plant.riskLevel) {
+    const timestamp = nowIsoString();
+
+    await database.runAsync(
+      `
+        UPDATE plants
+        SET
+          riskLevel = ?,
+          updatedAt = ?,
+          syncStatus = 'pending',
+          remoteUpdatedAt = NULL
+        WHERE id = ?
+      `,
+      riskAssessment.riskLevel,
+      timestamp,
+      plantId
+    );
+  }
 
   return riskAssessment;
 }
@@ -155,8 +185,7 @@ export async function getPlants(database?: SQLiteDatabase): Promise<Plant[]> {
 
   return activeDatabase.getAllAsync<Plant>(
     `
-      SELECT
-        ${PLANT_SELECT_COLUMNS}
+      SELECT ${PLANT_SELECT_COLUMNS}
       FROM plants
       ORDER BY name COLLATE NOCASE ASC, createdAt DESC
     `
@@ -203,12 +232,17 @@ export async function getPlantListItems(): Promise<PlantListItem[]> {
 export async function createPlant(values: PlantFormValues): Promise<Plant> {
   const database = await resolveDatabase();
   const timestamp = nowIsoString();
+  const currentUserId = await getCurrentSupabaseUserIdAsync();
   const plant = buildPlantRecord(values, {
     id: createId('plant'),
     createdAt: timestamp,
     updatedAt: timestamp,
     riskLevel: DEFAULT_RISK_LEVEL,
     lastInspectionDate: null,
+    photoPath: null,
+    userId: currentUserId,
+    syncStatus: 'pending',
+    remoteUpdatedAt: null,
   });
 
   await database.withTransactionAsync(async () => {
@@ -219,6 +253,7 @@ export async function createPlant(values: PlantFormValues): Promise<Plant> {
           name,
           species,
           photoUri,
+          photoPath,
           lastWateringDate,
           wateringIntervalDays,
           notes,
@@ -229,14 +264,18 @@ export async function createPlant(values: PlantFormValues): Promise<Plant> {
           customCareComment,
           riskLevel,
           lastInspectionDate,
+          userId,
+          syncStatus,
+          remoteUpdatedAt,
           createdAt,
           updatedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       plant.id,
       plant.name,
       plant.species,
       plant.photoUri,
+      plant.photoPath ?? null,
       plant.lastWateringDate,
       plant.wateringIntervalDays,
       plant.notes,
@@ -247,6 +286,9 @@ export async function createPlant(values: PlantFormValues): Promise<Plant> {
       plant.customCareComment,
       plant.riskLevel,
       plant.lastInspectionDate,
+      plant.userId ?? null,
+      plant.syncStatus ?? 'pending',
+      plant.remoteUpdatedAt ?? null,
       plant.createdAt,
       plant.updatedAt
     );
@@ -254,6 +296,7 @@ export async function createPlant(values: PlantFormValues): Promise<Plant> {
     await syncPlantDerivedState(plant.id, database);
   });
 
+  emitLocalDataChanged();
   await refreshScheduledNotificationsAsync();
 
   return (await getPlantById(plant.id)) ?? plant;
@@ -276,6 +319,10 @@ export async function updatePlant(
     updatedAt: nowIsoString(),
     riskLevel: existingPlant.riskLevel,
     lastInspectionDate: existingPlant.lastInspectionDate,
+    photoPath: existingPlant.photoPath ?? null,
+    userId: existingPlant.userId ?? (await getCurrentSupabaseUserIdAsync()),
+    syncStatus: 'pending',
+    remoteUpdatedAt: null,
   });
 
   await database.withTransactionAsync(async () => {
@@ -286,6 +333,7 @@ export async function updatePlant(
           name = ?,
           species = ?,
           photoUri = ?,
+          photoPath = ?,
           lastWateringDate = ?,
           wateringIntervalDays = ?,
           notes = ?,
@@ -296,12 +344,16 @@ export async function updatePlant(
           customCareComment = ?,
           riskLevel = ?,
           lastInspectionDate = ?,
+          userId = ?,
+          syncStatus = ?,
+          remoteUpdatedAt = ?,
           updatedAt = ?
         WHERE id = ?
       `,
       updatedPlant.name,
       updatedPlant.species,
       updatedPlant.photoUri,
+      updatedPlant.photoPath ?? null,
       updatedPlant.lastWateringDate,
       updatedPlant.wateringIntervalDays,
       updatedPlant.notes,
@@ -312,6 +364,9 @@ export async function updatePlant(
       updatedPlant.customCareComment,
       updatedPlant.riskLevel,
       updatedPlant.lastInspectionDate,
+      updatedPlant.userId ?? null,
+      updatedPlant.syncStatus ?? 'pending',
+      updatedPlant.remoteUpdatedAt ?? null,
       updatedPlant.updatedAt,
       updatedPlant.id
     );
@@ -319,6 +374,7 @@ export async function updatePlant(
     await syncPlantDerivedState(updatedPlant.id, database);
   });
 
+  emitLocalDataChanged();
   await refreshScheduledNotificationsAsync();
 
   return getPlantById(id);
@@ -326,8 +382,27 @@ export async function updatePlant(
 
 export async function deletePlant(id: string): Promise<void> {
   const database = await resolveDatabase();
+  const plant = await getPlantByIdInternal(id, database);
+
+  if (!plant) {
+    return;
+  }
+
+  await enqueueDeletion(
+    {
+      entityType: 'plant',
+      recordId: plant.id,
+      userId: plant.userId ?? null,
+      metadataJson: JSON.stringify({
+        photoPath: plant.photoPath ?? null,
+      }),
+    },
+    database
+  );
 
   await database.runAsync('DELETE FROM plants WHERE id = ?', id);
+
+  emitLocalDataChanged();
   await refreshScheduledNotificationsAsync();
 }
 
@@ -349,7 +424,11 @@ export async function markPlantAsWatered(
     await database.runAsync(
       `
         UPDATE plants
-        SET lastWateringDate = ?, updatedAt = ?
+        SET
+          lastWateringDate = ?,
+          updatedAt = ?,
+          syncStatus = 'pending',
+          remoteUpdatedAt = NULL
         WHERE id = ?
       `,
       actionDate,
@@ -364,7 +443,8 @@ export async function markPlantAsWatered(
         actionDate,
         comment,
       },
-      database
+      database,
+      plant.userId
     );
 
     await completeActiveTasksForPlantByType(
@@ -377,6 +457,7 @@ export async function markPlantAsWatered(
     await syncPlantDerivedState(plantId, database);
   });
 
+  emitLocalDataChanged();
   await refreshScheduledNotificationsAsync();
 
   return getPlantById(plantId);
@@ -405,7 +486,9 @@ export async function savePlantHealthState(
           conditionTags = ?,
           customCareComment = ?,
           lastInspectionDate = ?,
-          updatedAt = ?
+          updatedAt = ?,
+          syncStatus = 'pending',
+          remoteUpdatedAt = NULL
         WHERE id = ?
       `,
       serializeConditionTags(values.conditionTags),
@@ -422,7 +505,8 @@ export async function savePlantHealthState(
         actionDate,
         comment,
       },
-      database
+      database,
+      plant.userId
     );
 
     await completeActiveTasksForPlantByType(
@@ -435,6 +519,7 @@ export async function savePlantHealthState(
     await syncPlantDerivedState(plantId, database);
   });
 
+  emitLocalDataChanged();
   await refreshScheduledNotificationsAsync();
 
   return getPlantById(plantId);
@@ -465,7 +550,11 @@ export async function completePlantTask(
       await database.runAsync(
         `
           UPDATE plants
-          SET lastWateringDate = ?, updatedAt = ?
+          SET
+            lastWateringDate = ?,
+            updatedAt = ?,
+            syncStatus = 'pending',
+            remoteUpdatedAt = NULL
           WHERE id = ?
         `,
         actionDate,
@@ -476,7 +565,11 @@ export async function completePlantTask(
       await database.runAsync(
         `
           UPDATE plants
-          SET lastInspectionDate = ?, updatedAt = ?
+          SET
+            lastInspectionDate = ?,
+            updatedAt = ?,
+            syncStatus = 'pending',
+            remoteUpdatedAt = NULL
           WHERE id = ?
         `,
         actionDate,
@@ -492,13 +585,15 @@ export async function completePlantTask(
         actionDate,
         comment: comment?.trim() || CARE_TYPE_DEFAULT_COMMENTS[task.type],
       },
-      database
+      database,
+      plant.userId
     );
 
     await completeTaskById(task.id, completedAt, database);
     await syncPlantDerivedState(task.plantId, database);
   });
 
+  emitLocalDataChanged();
   await refreshScheduledNotificationsAsync();
 
   return getPlantById(task.plantId);

@@ -1,6 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
+import { subscribeToLocalDataChanges } from '@/lib/local-events';
 import { getPendingTasks } from '@/lib/tasks-repo';
 import { getErrorMessage } from '@/lib/validators';
 import type { CareTaskWithPlant } from '@/types/task';
@@ -29,6 +30,12 @@ export function useTasks() {
       void reload();
     }, [reload])
   );
+
+  useEffect(() => {
+    return subscribeToLocalDataChanges(() => {
+      void reload();
+    });
+  }, [reload]);
 
   return {
     tasks,

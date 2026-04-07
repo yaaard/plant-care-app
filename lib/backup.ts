@@ -7,6 +7,7 @@ import Constants from 'expo-constants';
 import { BACKUP_DIRECTORY_NAME, BACKUP_SCHEMA_VERSION, DEFAULT_SETTINGS } from '@/constants/defaultValues';
 import { getDatabase } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
+import { emitLocalDataChanged } from '@/lib/local-events';
 import { refreshScheduledNotificationsAsync } from '@/lib/notifications';
 import { refreshAllPlantCareState } from '@/lib/plants-repo';
 import { parseBackupData } from '@/lib/validators';
@@ -180,6 +181,7 @@ export async function pickBackupFileAsync(): Promise<ParsedBackupFile | null> {
 
 async function clearDatabaseTables(database: Awaited<ReturnType<typeof getDatabase>>) {
   await database.execAsync(`
+    DELETE FROM sync_deletions;
     DELETE FROM care_logs;
     DELETE FROM care_tasks;
     DELETE FROM plants;
@@ -299,6 +301,7 @@ export async function restoreBackupAsync(backup: AppBackup): Promise<void> {
 
   await refreshAllPlantCareState();
   await refreshScheduledNotificationsAsync();
+  emitLocalDataChanged();
 }
 
 export async function resetAllDataAsync(): Promise<void> {
@@ -327,4 +330,5 @@ export async function resetAllDataAsync(): Promise<void> {
   });
 
   await refreshScheduledNotificationsAsync();
+  emitLocalDataChanged();
 }

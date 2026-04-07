@@ -1,10 +1,26 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { CARE_TYPES, type CareType } from '@/constants/careTypes';
+import { type CareType } from '@/constants/careTypes';
 import { todayString } from '@/lib/date';
 import { createId, getDatabase, nowIsoString } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
+import { getCurrentSupabaseUserIdAsync } from '@/lib/supabase';
+import { enqueueDeletion } from '@/lib/sync-queue';
 import type { CareTask, CareTaskType, CareTaskWithPlant } from '@/types/task';
+
+const TASK_SELECT_COLUMNS = `
+  id,
+  plantId,
+  type,
+  scheduledDate,
+  isCompleted,
+  completedAt,
+  createdAt,
+  updatedAt,
+  userId,
+  syncStatus,
+  remoteUpdatedAt
+`;
 
 async function resolveDatabase(database?: SQLiteDatabase) {
   if (database) {
@@ -13,6 +29,23 @@ async function resolveDatabase(database?: SQLiteDatabase) {
 
   await initializeDatabase();
   return getDatabase();
+}
+
+async function getActiveTasksByPlantAndType(
+  plantId: string,
+  type: CareType,
+  database: SQLiteDatabase
+) {
+  return database.getAllAsync<CareTask>(
+    `
+      SELECT ${TASK_SELECT_COLUMNS}
+      FROM care_tasks
+      WHERE plantId = ? AND type = ? AND isCompleted = 0
+      ORDER BY scheduledDate ASC, createdAt ASC
+    `,
+    plantId,
+    type
+  );
 }
 
 export async function getPendingTasks(database?: SQLiteDatabase): Promise<CareTaskWithPlant[]> {
@@ -28,6 +61,10 @@ export async function getPendingTasks(database?: SQLiteDatabase): Promise<CareTa
         care_tasks.isCompleted,
         care_tasks.completedAt,
         care_tasks.createdAt,
+        COALESCE(NULLIF(care_tasks.updatedAt, ''), care_tasks.createdAt) AS updatedAt,
+        care_tasks.userId,
+        care_tasks.syncStatus,
+        care_tasks.remoteUpdatedAt,
         plants.name AS plantName,
         plants.species AS plantSpecies,
         plants.photoUri AS plantPhotoUri,
@@ -48,7 +85,7 @@ export async function getTaskById(
 
   return activeDatabase.getFirstAsync<CareTask>(
     `
-      SELECT id, plantId, type, scheduledDate, isCompleted, completedAt, createdAt
+      SELECT ${TASK_SELECT_COLUMNS}
       FROM care_tasks
       WHERE id = ?
       LIMIT 1
@@ -65,7 +102,7 @@ export async function getTasksByPlantId(
 
   return activeDatabase.getAllAsync<CareTask>(
     `
-      SELECT id, plantId, type, scheduledDate, isCompleted, completedAt, createdAt
+      SELECT ${TASK_SELECT_COLUMNS}
       FROM care_tasks
       WHERE plantId = ?
       ORDER BY isCompleted ASC, scheduledDate ASC, createdAt DESC
@@ -78,26 +115,34 @@ export async function createCareTaskIfNeeded(
   plantId: string,
   type: CareTaskType,
   scheduledDate: string,
-  database?: SQLiteDatabase
+  database?: SQLiteDatabase,
+  userId?: string | null
 ): Promise<CareTask> {
   const activeDatabase = await resolveDatabase(database);
+  const existingTasks = await getActiveTasksByPlantAndType(plantId, type, activeDatabase);
+  const matchingTask = existingTasks.find((task) => task.scheduledDate === scheduledDate) ?? null;
 
-  const existingTask = await activeDatabase.getFirstAsync<CareTask>(
-    `
-      SELECT id, plantId, type, scheduledDate, isCompleted, completedAt, createdAt
-      FROM care_tasks
-      WHERE plantId = ? AND type = ? AND scheduledDate = ? AND isCompleted = 0
-      LIMIT 1
-    `,
-    plantId,
-    type,
-    scheduledDate
-  );
+  if (matchingTask) {
+    const duplicateTasks = existingTasks.filter((task) => task.id !== matchingTask.id);
 
-  if (existingTask) {
-    return existingTask;
+    for (const duplicateTask of duplicateTasks) {
+      await enqueueDeletion(
+        {
+          entityType: 'task',
+          recordId: duplicateTask.id,
+          userId: duplicateTask.userId ?? userId ?? null,
+        },
+        activeDatabase
+      );
+
+      await activeDatabase.runAsync('DELETE FROM care_tasks WHERE id = ?', duplicateTask.id);
+    }
+
+    return matchingTask;
   }
 
+  const resolvedUserId = userId ?? (await getCurrentSupabaseUserIdAsync());
+  const timestamp = nowIsoString();
   const task: CareTask = {
     id: createId('task'),
     plantId,
@@ -105,7 +150,11 @@ export async function createCareTaskIfNeeded(
     scheduledDate,
     isCompleted: 0,
     completedAt: null,
-    createdAt: nowIsoString(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    userId: resolvedUserId,
+    syncStatus: 'pending',
+    remoteUpdatedAt: null,
   };
 
   await activeDatabase.runAsync(
@@ -117,8 +166,12 @@ export async function createCareTaskIfNeeded(
         scheduledDate,
         isCompleted,
         completedAt,
-        createdAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        createdAt,
+        updatedAt,
+        userId,
+        syncStatus,
+        remoteUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     task.id,
     task.plantId,
@@ -126,7 +179,11 @@ export async function createCareTaskIfNeeded(
     task.scheduledDate,
     task.isCompleted,
     task.completedAt,
-    task.createdAt
+    task.createdAt,
+    task.updatedAt ?? task.createdAt,
+    task.userId ?? null,
+    task.syncStatus ?? 'pending',
+    task.remoteUpdatedAt ?? null
   );
 
   return task;
@@ -138,6 +195,18 @@ export async function deleteActiveTasksForPlantByType(
   database?: SQLiteDatabase
 ): Promise<void> {
   const activeDatabase = await resolveDatabase(database);
+  const existingTasks = await getActiveTasksByPlantAndType(plantId, type, activeDatabase);
+
+  for (const task of existingTasks) {
+    await enqueueDeletion(
+      {
+        entityType: 'task',
+        recordId: task.id,
+        userId: task.userId ?? null,
+      },
+      activeDatabase
+    );
+  }
 
   await activeDatabase.runAsync(
     `
@@ -153,12 +222,40 @@ export async function replaceActiveTaskForPlantByType(
   plantId: string,
   type: CareType,
   scheduledDate: string,
-  database?: SQLiteDatabase
+  database?: SQLiteDatabase,
+  userId?: string | null
 ): Promise<void> {
   const activeDatabase = await resolveDatabase(database);
+  const existingTasks = await getActiveTasksByPlantAndType(plantId, type, activeDatabase);
+  const exactTask = existingTasks.find((task) => task.scheduledDate === scheduledDate) ?? null;
+
+  if (exactTask && existingTasks.length === 1) {
+    return;
+  }
+
+  if (exactTask) {
+    for (const task of existingTasks) {
+      if (task.id === exactTask.id) {
+        continue;
+      }
+
+      await enqueueDeletion(
+        {
+          entityType: 'task',
+          recordId: task.id,
+          userId: task.userId ?? userId ?? null,
+        },
+        activeDatabase
+      );
+
+      await activeDatabase.runAsync('DELETE FROM care_tasks WHERE id = ?', task.id);
+    }
+
+    return;
+  }
 
   await deleteActiveTasksForPlantByType(plantId, type, activeDatabase);
-  await createCareTaskIfNeeded(plantId, type, scheduledDate, activeDatabase);
+  await createCareTaskIfNeeded(plantId, type, scheduledDate, activeDatabase, userId);
 }
 
 export async function completeTaskById(
@@ -171,9 +268,15 @@ export async function completeTaskById(
   await activeDatabase.runAsync(
     `
       UPDATE care_tasks
-      SET isCompleted = 1, completedAt = ?
+      SET
+        isCompleted = 1,
+        completedAt = ?,
+        updatedAt = ?,
+        syncStatus = 'pending',
+        remoteUpdatedAt = NULL
       WHERE id = ?
     `,
+    completedAt,
     completedAt,
     taskId
   );
@@ -190,9 +293,15 @@ export async function completeActiveTasksForPlantByType(
   await activeDatabase.runAsync(
     `
       UPDATE care_tasks
-      SET isCompleted = 1, completedAt = ?
+      SET
+        isCompleted = 1,
+        completedAt = ?,
+        updatedAt = ?,
+        syncStatus = 'pending',
+        remoteUpdatedAt = NULL
       WHERE plantId = ? AND type = ? AND isCompleted = 0
     `,
+    completedAt,
     completedAt,
     plantId,
     type

@@ -2,7 +2,21 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { createId, getDatabase, nowIsoString } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
+import { getCurrentSupabaseUserIdAsync } from '@/lib/supabase';
 import type { CareActionType, CareLog, CareLogWithPlant } from '@/types/log';
+
+const LOG_SELECT_COLUMNS = `
+  id,
+  plantId,
+  actionType,
+  actionDate,
+  comment,
+  createdAt,
+  updatedAt,
+  userId,
+  syncStatus,
+  remoteUpdatedAt
+`;
 
 async function resolveDatabase(database?: SQLiteDatabase) {
   if (database) {
@@ -25,6 +39,10 @@ export async function getLogs(database?: SQLiteDatabase): Promise<CareLogWithPla
         care_logs.actionDate,
         care_logs.comment,
         care_logs.createdAt,
+        COALESCE(NULLIF(care_logs.updatedAt, ''), care_logs.createdAt) AS updatedAt,
+        care_logs.userId,
+        care_logs.syncStatus,
+        care_logs.remoteUpdatedAt,
         COALESCE(plants.name, 'Удалённое растение') AS plantName,
         COALESCE(plants.species, 'Вид не указан') AS plantSpecies
       FROM care_logs
@@ -42,7 +60,7 @@ export async function getLogsByPlantId(
 
   return activeDatabase.getAllAsync<CareLog>(
     `
-      SELECT id, plantId, actionType, actionDate, comment, createdAt
+      SELECT ${LOG_SELECT_COLUMNS}
       FROM care_logs
       WHERE plantId = ?
       ORDER BY actionDate DESC, createdAt DESC
@@ -80,9 +98,12 @@ export async function addCareLog(
     actionDate: string;
     comment: string;
   },
-  database?: SQLiteDatabase
+  database?: SQLiteDatabase,
+  userId?: string | null
 ): Promise<CareLog> {
   const activeDatabase = await resolveDatabase(database);
+  const timestamp = nowIsoString();
+  const resolvedUserId = userId ?? (await getCurrentSupabaseUserIdAsync());
 
   const log: CareLog = {
     id: createId('log'),
@@ -90,20 +111,39 @@ export async function addCareLog(
     actionType: values.actionType,
     actionDate: values.actionDate,
     comment: values.comment,
-    createdAt: nowIsoString(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    userId: resolvedUserId,
+    syncStatus: 'pending',
+    remoteUpdatedAt: null,
   };
 
   await activeDatabase.runAsync(
     `
-      INSERT INTO care_logs (id, plantId, actionType, actionDate, comment, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO care_logs (
+        id,
+        plantId,
+        actionType,
+        actionDate,
+        comment,
+        createdAt,
+        updatedAt,
+        userId,
+        syncStatus,
+        remoteUpdatedAt
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     log.id,
     log.plantId,
     log.actionType,
     log.actionDate,
     log.comment,
-    log.createdAt
+    log.createdAt,
+    log.updatedAt ?? log.createdAt,
+    log.userId ?? null,
+    log.syncStatus ?? 'pending',
+    log.remoteUpdatedAt ?? null
   );
 
   return log;

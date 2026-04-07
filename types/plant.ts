@@ -1,4 +1,5 @@
 import type { RiskLevel } from '@/types/risk';
+import type { SyncStatus } from '@/types/sync';
 import type { CareTaskType } from '@/types/task';
 
 export type PlantConditionTag =
@@ -23,6 +24,7 @@ export interface Plant {
   name: string;
   species: string;
   photoUri: string | null;
+  photoPath?: string | null;
   lastWateringDate: string | null;
   wateringIntervalDays: number;
   notes: string;
@@ -35,6 +37,9 @@ export interface Plant {
   lastInspectionDate: string | null;
   createdAt: string;
   updatedAt: string;
+  userId?: string | null;
+  syncStatus?: SyncStatus;
+  remoteUpdatedAt?: string | null;
 }
 
 export interface PlantFormValues {

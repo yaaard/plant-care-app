@@ -22,13 +22,17 @@ import {
   restoreBackupAsync,
   shareBackupFileAsync,
 } from '@/lib/backup';
+import { formatDateTime } from '@/lib/formatters';
 import { refreshScheduledNotificationsAsync } from '@/lib/notifications';
 import { getSettings, updateSettings } from '@/lib/settings-repo';
+import { bindAnonymousDataToUser } from '@/lib/sync';
 import {
   getErrorMessage,
   normalizeSettingsFormValues,
   validateSettings,
 } from '@/lib/validators';
+import { useAuth } from '@/hooks/useAuth';
+import { useSync } from '@/hooks/useSync';
 
 type FeedbackState = {
   type: 'success' | 'error';
@@ -36,6 +40,15 @@ type FeedbackState = {
 } | null;
 
 export default function SettingsScreen() {
+  const { user, signOut } = useAuth();
+  const {
+    isSyncing,
+    lastSyncAt,
+    syncError,
+    pendingChangesCount,
+    syncNow,
+    dismissSyncError,
+  } = useSync();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [notificationHour, setNotificationHour] = useState('9');
   const [notificationMinute, setNotificationMinute] = useState('0');
@@ -52,7 +65,6 @@ export default function SettingsScreen() {
       setNotificationsEnabled(Boolean(settings.notificationsEnabled));
       setNotificationHour(String(settings.notificationHour));
       setNotificationMinute(String(settings.notificationMinute));
-      setFeedback(null);
     } catch (error) {
       setFeedback({
         type: 'error',
@@ -100,7 +112,7 @@ export default function SettingsScreen() {
       if (result.permissionGranted === false) {
         setFeedback({
           type: 'error',
-          text: 'Настройки сохранены, но система не дала доступ к уведомлениям. Напоминания не будут показаны.',
+          text: 'Настройки сохранены, но система не дала доступ к уведомлениям.',
         });
       } else {
         setFeedback({
@@ -115,6 +127,18 @@ export default function SettingsScreen() {
       });
     } finally {
       setSavingNotifications(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    dismissSyncError();
+    const success = await syncNow();
+
+    if (success) {
+      setFeedback({
+        type: 'success',
+        text: 'Данные успешно синхронизированы.',
+      });
     }
   };
 
@@ -168,6 +192,12 @@ export default function SettingsScreen() {
               void (async () => {
                 try {
                   await restoreBackupAsync(parsed.backup);
+
+                  if (user) {
+                    await bindAnonymousDataToUser(user.id);
+                    await syncNow();
+                  }
+
                   await loadSettings();
                   setFeedback({
                     type: 'success',
@@ -197,8 +227,8 @@ export default function SettingsScreen() {
 
   const confirmReset = () => {
     Alert.alert(
-      'Сбросить все данные?',
-      'Будут удалены растения, задачи, журнал действий и локальные настройки напоминаний.',
+      'Сбросить локальные данные?',
+      'Будут удалены только данные на этом устройстве. Если аккаунт подключён, облачные данные останутся и могут снова загрузиться после синхронизации.',
       [
         { text: 'Отмена', style: 'cancel' },
         {
@@ -213,12 +243,12 @@ export default function SettingsScreen() {
                 await loadSettings();
                 setFeedback({
                   type: 'success',
-                  text: 'Все локальные данные приложения удалены.',
+                  text: 'Локальные данные на устройстве удалены.',
                 });
               } catch (error) {
                 setFeedback({
                   type: 'error',
-                  text: getErrorMessage(error, 'Не удалось сбросить данные приложения.'),
+                  text: getErrorMessage(error, 'Не удалось сбросить локальные данные.'),
                 });
               } finally {
                 setBackupBusy(false);
@@ -230,10 +260,78 @@ export default function SettingsScreen() {
     );
   };
 
+  const confirmSignOut = () => {
+    Alert.alert('Выйти из аккаунта?', 'Локальные данные текущего пользователя будут очищены с устройства.', [
+      { text: 'Отмена', style: 'cancel' },
+      {
+        text: 'Выйти',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            try {
+              await signOut();
+            } catch (error) {
+              setFeedback({
+                type: 'error',
+                text: getErrorMessage(error, 'Не удалось выйти из аккаунта.'),
+              });
+            }
+          })();
+        },
+      },
+    ]);
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <SectionTitle title="Настройки" />
+
+        <SettingSection
+          description="Аккаунт нужен для синхронизации растений, истории и фото между устройствами."
+          title="Аккаунт"
+        >
+          <Text style={styles.label}>Email</Text>
+          <Text style={styles.value}>{user?.email ?? 'Не удалось определить email'}</Text>
+
+          <Text style={styles.label}>Статус</Text>
+          <Text style={styles.value}>Вход выполнен</Text>
+
+          <Pressable
+            onPress={confirmSignOut}
+            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.secondaryButtonText}>Выйти</Text>
+          </Pressable>
+        </SettingSection>
+
+        <SettingSection
+          description="Синхронизация отправляет локальные изменения в Supabase и подтягивает данные аккаунта обратно в SQLite."
+          title="Синхронизация"
+        >
+          <Text style={styles.label}>Последняя синхронизация</Text>
+          <Text style={styles.value}>{formatDateTime(lastSyncAt, 'Ещё не выполнялась')}</Text>
+
+          <Text style={styles.label}>Ожидают отправки</Text>
+          <Text style={styles.value}>{pendingChangesCount}</Text>
+
+          {syncError ? <Text style={styles.errorText}>{syncError}</Text> : null}
+
+          <Pressable
+            disabled={isSyncing}
+            onPress={() => {
+              void handleManualSync();
+            }}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              (pressed || isSyncing) && styles.pressed,
+            ]}
+          >
+            <Text style={styles.primaryButtonText}>
+              {isSyncing ? 'Синхронизируем...' : 'Синхронизировать сейчас'}
+            </Text>
+          </Pressable>
+        </SettingSection>
 
         <SettingSection
           description="Одно локальное уведомление на каждую активную задачу по уходу."
@@ -291,7 +389,7 @@ export default function SettingsScreen() {
         </SettingSection>
 
         <SettingSection
-          description="Экспорт создаёт один JSON-файл со всеми данными приложения. Импорт полностью заменяет текущую локальную базу."
+          description="Экспорт создаёт один JSON-файл. Импорт заменяет локальную базу и затем может быть синхронизирован в аккаунт."
           title="Резервное копирование"
         >
           <View style={styles.actionColumn}>
@@ -326,7 +424,7 @@ export default function SettingsScreen() {
         </SettingSection>
 
         <SettingSection
-          description="Эти действия нельзя отменить. Перед сбросом рекомендуется сделать backup."
+          description="Эти действия касаются только локального устройства. Для удаления облачных данных используйте аккаунт и синхронизацию осознанно."
           title="Опасные действия"
           tone="danger"
         >
@@ -338,7 +436,7 @@ export default function SettingsScreen() {
               (pressed || backupBusy) && styles.pressed,
             ]}
           >
-            <Text style={styles.dangerButtonText}>Сбросить все данные</Text>
+            <Text style={styles.dangerButtonText}>Сбросить локальные данные</Text>
           </Pressable>
         </SettingSection>
 
@@ -352,7 +450,7 @@ export default function SettingsScreen() {
             <Text
               style={[
                 styles.messageText,
-                feedback.type === 'success' ? styles.successText : styles.errorText,
+                feedback.type === 'success' ? styles.successText : styles.errorMessageText,
               ]}
             >
               {feedback.text}
@@ -360,7 +458,7 @@ export default function SettingsScreen() {
           </View>
         ) : (
           <EmptyState
-            description="Здесь можно управлять уведомлениями, резервными копиями и сбросом локальных данных."
+            description="Здесь можно управлять аккаунтом, синхронизацией, уведомлениями и локальными резервными копиями."
             title="Параметры приложения"
           />
         )}
@@ -377,6 +475,17 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  label: {
+    color: '#667085',
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  value: {
+    color: '#163020',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
   },
   switchRow: {
     alignItems: 'center',
@@ -458,8 +567,14 @@ const styles = StyleSheet.create({
   successText: {
     color: '#2f6f3e',
   },
+  errorMessageText: {
+    color: '#9a3412',
+  },
   errorText: {
     color: '#9a3412',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
   },
   pressed: {
     opacity: 0.9,
