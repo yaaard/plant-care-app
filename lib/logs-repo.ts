@@ -25,10 +25,10 @@ export async function getLogs(database?: SQLiteDatabase): Promise<CareLogWithPla
         care_logs.actionDate,
         care_logs.comment,
         care_logs.createdAt,
-        plants.name AS plantName,
-        plants.species AS plantSpecies
+        COALESCE(plants.name, 'Удалённое растение') AS plantName,
+        COALESCE(plants.species, 'Вид не указан') AS plantSpecies
       FROM care_logs
-      INNER JOIN plants ON plants.id = care_logs.plantId
+      LEFT JOIN plants ON plants.id = care_logs.plantId
       ORDER BY care_logs.actionDate DESC, care_logs.createdAt DESC
     `
   );

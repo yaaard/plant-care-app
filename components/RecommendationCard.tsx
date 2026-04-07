@@ -31,7 +31,7 @@ export function RecommendationCard({
       {content ? <Text style={styles.content}>{content}</Text> : null}
       {items.map((item) => (
         <Text key={item} style={styles.item}>
-          • {item}
+          - {item}
         </Text>
       ))}
     </View>

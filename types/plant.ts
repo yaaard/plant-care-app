@@ -1,4 +1,5 @@
 import type { RiskLevel } from '@/types/risk';
+import type { CareTaskType } from '@/types/task';
 
 export type PlantConditionTag =
   | 'yellow_leaves'
@@ -57,6 +58,8 @@ export interface PlantHealthFormValues {
 
 export interface PlantListItem extends Plant {
   nextWateringDate: string;
+  nextTaskDate: string | null;
+  nextTaskType: CareTaskType | null;
   isOverdue: boolean;
   overdueTaskCount: number;
 }

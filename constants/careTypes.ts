@@ -24,6 +24,14 @@ export const CARE_TYPE_LABELS: Record<CareType, string> = {
   inspection: 'Осмотр',
 };
 
+export const CARE_TYPE_SORT_ORDER: Record<CareType, number> = {
+  watering: 1,
+  inspection: 2,
+  spraying: 3,
+  fertilizing: 4,
+  repotting: 5,
+};
+
 export const CARE_TYPE_DEFAULT_COMMENTS: Record<CareType, string> = {
   watering: 'Полив отмечен в приложении',
   fertilizing: 'Подкормка отмечена в приложении',

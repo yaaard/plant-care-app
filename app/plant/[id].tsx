@@ -9,7 +9,9 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  type StyleProp,
   Text,
+  type TextStyle,
   View,
 } from 'react-native';
 import { Stack, type Href, useLocalSearchParams, useRouter } from 'expo-router';
@@ -19,10 +21,10 @@ import { EmptyState } from '@/components/EmptyState';
 import { QuickActionButtons } from '@/components/QuickActionButtons';
 import { RiskBadge } from '@/components/RiskBadge';
 import { SectionTitle } from '@/components/SectionTitle';
-import { getCareTypeLabel } from '@/constants/careTypes';
 import { getHealthTagLabel } from '@/constants/healthTags';
 import { getPlantGuideEntryByName } from '@/constants/plantGuide';
-import { formatDateLabel, getNextWateringDate } from '@/lib/date';
+import { formatCareType, formatDateTime, formatDisplayDate, formatTaskDate } from '@/lib/formatters';
+import { getNextWateringDate } from '@/lib/date';
 import { getLogsByPlantId } from '@/lib/logs-repo';
 import { completePlantTask, deletePlant, getPlantById, markPlantAsWatered } from '@/lib/plants-repo';
 import { buildPlantRecommendations } from '@/lib/recommendations';
@@ -35,6 +37,14 @@ import type { CareTask } from '@/types/task';
 
 function normalizeParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function renderPlainList(items: string[], textStyle: StyleProp<TextStyle>) {
+  return items.map((item) => (
+    <Text key={item} style={textStyle}>
+      - {item}
+    </Text>
+  ));
 }
 
 export default function PlantDetailsScreen() {
@@ -118,7 +128,7 @@ export default function PlantDetailsScreen() {
   const confirmDelete = () => {
     Alert.alert(
       'Удалить растение?',
-      'Карточка растения, связанные задачи и журнал действий будут удалены локально с устройства.',
+      'Карточка растения, задачи по уходу и журнал действий будут удалены локально с устройства.',
       [
         {
           text: 'Отмена',
@@ -182,6 +192,10 @@ export default function PlantDetailsScreen() {
   const nextWateringDate =
     activeTasks.find((task) => task.type === 'watering')?.scheduledDate ??
     (plant ? getNextWateringDate(plant.lastWateringDate, plant.wateringIntervalDays) : null);
+  const riskReasons = riskAssessment?.reasons.slice(0, 3) ?? [];
+  const priorityChecks = recommendation?.priorityChecks.slice(0, 3) ?? [];
+  const highlights = recommendation?.highlights.slice(0, 2) ?? [];
+  const displayedLogs = logs.slice(0, 12);
 
   if (loading && !plant) {
     return (
@@ -234,7 +248,10 @@ export default function PlantDetailsScreen() {
           <Image source={{ uri: plant.photoUri }} style={styles.photo} />
         ) : (
           <View style={styles.photoPlaceholder}>
-            <Text style={styles.photoPlaceholderText}>Фото не добавлено</Text>
+            <Text style={styles.photoPlaceholderTitle}>Фото не добавлено</Text>
+            <Text style={styles.photoPlaceholderSubtitle}>
+              Можно прикрепить изображение на экране редактирования.
+            </Text>
           </View>
         )}
 
@@ -249,37 +266,55 @@ export default function PlantDetailsScreen() {
 
           <Text style={styles.summaryText}>{riskAssessment.summary}</Text>
 
-          <View style={styles.reasonBox}>
-            <Text style={styles.reasonTitle}>Ключевые причины риска</Text>
-            {riskAssessment.reasons.length === 0 ? (
-              <Text style={styles.reasonText}>Серьёзных факторов риска по текущим данным не найдено.</Text>
-            ) : (
-              riskAssessment.reasons.slice(0, 3).map((reason) => (
-                <Text key={reason} style={styles.reasonText}>
-                  • {reason}
-                </Text>
-              ))
-            )}
+          <View style={styles.metaRow}>
+            <Text style={styles.metaText}>Обновлено: {formatDateTime(plant.updatedAt)}</Text>
+            <Text style={styles.metaText}>Интервал полива: {plant.wateringIntervalDays} дн.</Text>
           </View>
 
           <View style={styles.infoGrid}>
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Последний полив</Text>
-              <Text style={styles.infoValue}>{formatDateLabel(plant.lastWateringDate)}</Text>
+              <Text style={styles.infoValue}>{formatDisplayDate(plant.lastWateringDate)}</Text>
             </View>
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Следующий полив</Text>
-              <Text style={styles.infoValue}>{formatDateLabel(nextWateringDate)}</Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Интервал полива</Text>
-              <Text style={styles.infoValue}>{plant.wateringIntervalDays} дн.</Text>
+              <Text style={styles.infoValue}>{formatTaskDate(nextWateringDate)}</Text>
             </View>
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Последний осмотр</Text>
-              <Text style={styles.infoValue}>{formatDateLabel(plant.lastInspectionDate)}</Text>
+              <Text style={styles.infoValue}>{formatDisplayDate(plant.lastInspectionDate)}</Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Справочный полив</Text>
+              <Text style={styles.infoValue}>
+                {guideEntry
+                  ? `Примерно раз в ${guideEntry.recommendedWateringIntervalDays} дн.`
+                  : 'Нет данных'}
+              </Text>
             </View>
           </View>
+        </View>
+
+        <View style={styles.card}>
+          <SectionTitle title="Краткая рекомендация" />
+          {highlights.length > 0 ? (
+            renderPlainList(highlights, styles.bodyText)
+          ) : (
+            <Text style={styles.bodyText}>
+              Данных достаточно только для общего профилактического ухода.
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <SectionTitle title="Что проверить сейчас" />
+          {priorityChecks.length > 0 ? (
+            renderPlainList(priorityChecks, styles.bodyText)
+          ) : (
+            <Text style={styles.bodyText}>
+              Срочных проверок нет. Поддерживайте текущий режим и периодически осматривайте растение.
+            </Text>
+          )}
         </View>
 
         <View style={styles.card}>
@@ -299,16 +334,12 @@ export default function PlantDetailsScreen() {
               <Text style={styles.infoValue}>{plant.roomTemperature || 'Не указано'}</Text>
             </View>
             <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Справочный полив</Text>
-              <Text style={styles.infoValue}>
-                {guideEntry
-                  ? `примерно раз в ${guideEntry.recommendedWateringIntervalDays} дн.`
-                  : 'Нет данных'}
-              </Text>
+              <Text style={styles.infoLabel}>Комментарий по уходу</Text>
+              <Text style={styles.infoValue}>{plant.customCareComment || 'Не указан'}</Text>
             </View>
           </View>
 
-          <Text style={styles.sectionLabel}>Теги состояния</Text>
+          <Text style={styles.sectionLabel}>Статус растения</Text>
           {conditionTags.length > 0 ? (
             <View style={styles.tagWrap}>
               {conditionTags.map((tag) => (
@@ -321,35 +352,15 @@ export default function PlantDetailsScreen() {
             <Text style={styles.bodyText}>Симптомы пока не отмечены.</Text>
           )}
 
-          <Text style={styles.sectionLabel}>Комментарий пользователя</Text>
-          <Text style={styles.bodyText}>
-            {plant.customCareComment || 'Пока нет дополнительного комментария.'}
-          </Text>
-
-          <Text style={styles.sectionLabel}>Общие заметки</Text>
-          <Text style={styles.bodyText}>{plant.notes || 'Пока нет заметок.'}</Text>
-        </View>
-
-        <View style={styles.card}>
-          <SectionTitle title="Краткая рекомендация" />
-          {recommendation.highlights.map((item) => (
-            <Text key={item} style={styles.bodyText}>
-              • {item}
-            </Text>
-          ))}
-        </View>
-
-        <View style={styles.card}>
-          <SectionTitle title="Что проверить сейчас" />
-          {recommendation.priorityChecks.length > 0 ? (
-            recommendation.priorityChecks.map((item) => (
-              <Text key={item} style={styles.bodyText}>
-                • {item}
-              </Text>
-            ))
+          <Text style={styles.sectionLabel}>Ключевые причины риска</Text>
+          {riskReasons.length > 0 ? (
+            renderPlainList(riskReasons, styles.bodyText)
           ) : (
-            <Text style={styles.bodyText}>Поддерживайте текущий режим и периодически проводите осмотр.</Text>
+            <Text style={styles.bodyText}>Выраженных факторов риска по текущим данным не найдено.</Text>
           )}
+
+          <Text style={styles.sectionLabel}>Заметки</Text>
+          <Text style={styles.bodyText}>{plant.notes || 'Заметки не добавлены.'}</Text>
         </View>
 
         <View style={styles.card}>
@@ -397,7 +408,7 @@ export default function PlantDetailsScreen() {
         </View>
 
         <View style={styles.card}>
-          <SectionTitle title="Ближайшие действия" />
+          <SectionTitle title="Ближайшие задачи" />
           <QuickActionButtons
             busyTaskId={busyTaskId}
             onComplete={(task) => {
@@ -405,14 +416,24 @@ export default function PlantDetailsScreen() {
             }}
             tasks={activeTasks.slice(0, 3)}
           />
+
           {activeTasks.length === 0 ? (
             <Text style={styles.bodyText}>Активных задач сейчас нет.</Text>
-          ) : null}
+          ) : (
+            <View style={styles.compactTaskList}>
+              {activeTasks.slice(0, 4).map((task) => (
+                <View key={task.id} style={styles.compactTaskItem}>
+                  <Text style={styles.compactTaskType}>{formatCareType(task.type)}</Text>
+                  <Text style={styles.compactTaskDate}>{formatTaskDate(task.scheduledDate)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
         {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
-        <SectionTitle title="Задачи по уходу" />
+        <SectionTitle title="Все задачи по уходу" />
         {tasks.length === 0 ? (
           <EmptyState
             description="Для этого растения пока нет сохранённых задач."
@@ -433,20 +454,17 @@ export default function PlantDetailsScreen() {
         )}
 
         <SectionTitle title="История действий" />
-        {logs.length === 0 ? (
+        {displayedLogs.length === 0 ? (
           <EmptyState
             description="После первого выполненного действия здесь появится журнал ухода по растению."
             title="История пока пуста"
           />
         ) : (
-          logs.map((log) => (
+          displayedLogs.map((log) => (
             <View key={log.id} style={styles.logCard}>
-              <Text style={styles.logTitle}>
-                {getCareTypeLabel(log.actionType)} • {log.actionDate}
-              </Text>
-              <Text style={styles.logComment}>
-                {log.comment || 'Комментарий не указан.'}
-              </Text>
+              <Text style={styles.logTitle}>{formatDisplayDate(log.actionDate)}</Text>
+              <Text style={styles.logType}>{formatCareType(log.actionType)}</Text>
+              <Text style={styles.logComment}>{log.comment || 'Комментарий не указан.'}</Text>
             </View>
           ))
         )}
@@ -492,15 +510,26 @@ const styles = StyleSheet.create({
   },
   photoPlaceholder: {
     alignItems: 'center',
-    backgroundColor: '#f0f3ef',
+    backgroundColor: '#edf3ed',
+    borderColor: '#d5ddd2',
     borderRadius: 20,
+    borderWidth: 1,
     height: 240,
     justifyContent: 'center',
     marginBottom: 16,
+    paddingHorizontal: 24,
   },
-  photoPlaceholderText: {
+  photoPlaceholderTitle: {
+    color: '#163020',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  photoPlaceholderSubtitle: {
     color: '#667085',
-    fontSize: 16,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
   },
   card: {
     backgroundColor: '#ffffff',
@@ -535,23 +564,15 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
   },
-  reasonBox: {
-    backgroundColor: '#f7faf7',
-    borderRadius: 16,
-    marginTop: 14,
-    padding: 14,
+  metaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 12,
   },
-  reasonTitle: {
-    color: '#163020',
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  reasonText: {
-    color: '#163020',
-    fontSize: 14,
-    lineHeight: 21,
-    marginBottom: 4,
+  metaText: {
+    color: '#667085',
+    fontSize: 12,
   },
   infoGrid: {
     gap: 12,
@@ -577,6 +598,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     marginBottom: 8,
+    marginTop: 14,
   },
   bodyText: {
     color: '#163020',
@@ -588,7 +610,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 14,
+    marginBottom: 6,
   },
   tag: {
     backgroundColor: '#edf7ef',
@@ -630,6 +652,28 @@ const styles = StyleSheet.create({
   buttonSpacer: {
     height: 10,
   },
+  compactTaskList: {
+    marginTop: 12,
+  },
+  compactTaskItem: {
+    alignItems: 'center',
+    borderTopColor: '#e4ebe3',
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+  },
+  compactTaskType: {
+    color: '#163020',
+    fontSize: 14,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  compactTaskDate: {
+    color: '#667085',
+    fontSize: 13,
+    marginLeft: 12,
+  },
   dangerButton: {
     alignItems: 'center',
     backgroundColor: '#fff1e8',
@@ -664,7 +708,14 @@ const styles = StyleSheet.create({
     color: '#163020',
     fontSize: 16,
     fontWeight: '700',
+    marginBottom: 6,
+  },
+  logType: {
+    color: '#2f6f3e',
+    fontSize: 13,
+    fontWeight: '700',
     marginBottom: 8,
+    textTransform: 'capitalize',
   },
   logComment: {
     color: '#163020',

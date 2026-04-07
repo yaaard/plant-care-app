@@ -6,8 +6,8 @@ import { Stack, type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { EmptyState } from '@/components/EmptyState';
 import { RecommendationCard } from '@/components/RecommendationCard';
 import { RiskBadge } from '@/components/RiskBadge';
-import { getCareTypeLabel } from '@/constants/careTypes';
 import { getPlantGuideEntryByName } from '@/constants/plantGuide';
+import { formatCareType } from '@/lib/formatters';
 import { getLogsByPlantId } from '@/lib/logs-repo';
 import { getPlantById } from '@/lib/plants-repo';
 import { buildPlantRecommendations } from '@/lib/recommendations';
@@ -131,8 +131,8 @@ export default function PlantRecommendationsScreen() {
 
           <Text style={styles.summaryText}>{recommendation.summary}</Text>
           <Text style={styles.noteText}>
-            Советы носят ориентировочный характер и основаны на локальных правилах, без внешних
-            AI-сервисов и удалённой диагностики.
+            Советы носят ориентировочный характер и формируются локально на основе правил,
+            справочника растения, задач ухода и зафиксированного состояния.
           </Text>
         </View>
 
@@ -148,9 +148,9 @@ export default function PlantRecommendationsScreen() {
           </View>
         ) : null}
 
-        <RecommendationCard title="Полив" content={recommendation.wateringAdvice} />
-        <RecommendationCard title="Освещение" content={recommendation.lightAdvice} />
-        <RecommendationCard title="Влажность" content={recommendation.humidityAdvice} />
+        <RecommendationCard content={recommendation.wateringAdvice} title="Полив" />
+        <RecommendationCard content={recommendation.lightAdvice} title="Освещение" />
+        <RecommendationCard content={recommendation.humidityAdvice} title="Влажность" />
         <RecommendationCard
           items={recommendation.riskWarnings}
           title="Возможные риски"
@@ -166,10 +166,9 @@ export default function PlantRecommendationsScreen() {
           title="Персональные советы"
           tone="success"
         />
-
         <RecommendationCard
-          items={recommendation.suggestedCareTypes.map((type) => getCareTypeLabel(type))}
-          title="Рекомендуемые действия"
+          items={recommendation.suggestedCareTypes.map((type) => formatCareType(type))}
+          title="Подходящие действия по уходу"
         />
       </ScrollView>
     </SafeAreaView>

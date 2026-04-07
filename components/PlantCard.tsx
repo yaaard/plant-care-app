@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { RiskBadge } from '@/components/RiskBadge';
-import { formatDateLabel } from '@/lib/date';
+import { formatCareType, formatShortDate, formatTaskDate } from '@/lib/formatters';
 import type { PlantListItem } from '@/types/plant';
 
 type PlantCardProps = {
@@ -26,23 +26,31 @@ export function PlantCard({ plant, onPress }: PlantCardProps) {
 
       <View style={styles.metaRow}>
         <View style={styles.metaItem}>
-          <Text style={styles.metaLabel}>Следующий полив</Text>
-          <Text style={styles.metaValue}>{formatDateLabel(plant.nextWateringDate)}</Text>
+          <Text style={styles.metaLabel}>Ближайшая задача</Text>
+          <Text style={styles.metaValue}>
+            {plant.nextTaskType ? formatCareType(plant.nextTaskType) : 'Нет активных задач'}
+          </Text>
+          <Text style={styles.metaHint}>
+            {plant.nextTaskDate ? formatTaskDate(plant.nextTaskDate) : 'Будет рассчитана автоматически'}
+          </Text>
         </View>
+
         <View style={styles.metaItem}>
-          <Text style={styles.metaLabel}>Просроченные задачи</Text>
-          <Text style={[styles.metaValue, plant.overdueTaskCount > 0 && styles.overdueValue]}>
-            {plant.overdueTaskCount}
+          <Text style={styles.metaLabel}>Следующий полив</Text>
+          <Text style={styles.metaValue}>{formatShortDate(plant.nextWateringDate)}</Text>
+          <Text style={[styles.metaHint, plant.overdueTaskCount > 0 && styles.attentionText]}>
+            Просроченных задач: {plant.overdueTaskCount}
           </Text>
         </View>
       </View>
 
-      <View style={styles.statusRow}>
+      <View style={styles.footerRow}>
         <View style={[styles.badge, plant.isOverdue && styles.overdueBadge]}>
           <Text style={[styles.badgeText, plant.isOverdue && styles.overdueBadgeText]}>
             {plant.isOverdue ? 'Требует внимания' : 'Уход по плану'}
           </Text>
         </View>
+        <Text style={styles.updatedText}>Обновлено: {formatShortDate(plant.updatedAt.slice(0, 10), '—')}</Text>
       </View>
     </Pressable>
   );
@@ -90,18 +98,28 @@ const styles = StyleSheet.create({
   },
   metaLabel: {
     color: '#667085',
-    fontSize: 13,
+    fontSize: 12,
     marginBottom: 4,
   },
   metaValue: {
     color: '#163020',
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  metaHint: {
+    color: '#667085',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  attentionText: {
+    color: '#c2410c',
     fontWeight: '600',
   },
-  overdueValue: {
-    color: '#c2410c',
-  },
-  statusRow: {
+  footerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginTop: 14,
   },
   badge: {
@@ -121,5 +139,10 @@ const styles = StyleSheet.create({
   },
   overdueBadgeText: {
     color: '#c2410c',
+  },
+  updatedText: {
+    color: '#667085',
+    fontSize: 12,
+    marginLeft: 12,
   },
 });

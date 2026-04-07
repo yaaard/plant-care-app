@@ -19,7 +19,10 @@ export function EmptyState({
       <Text style={styles.description}>{description}</Text>
 
       {actionLabel && onActionPress ? (
-        <Pressable onPress={onActionPress} style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
+        <Pressable
+          onPress={onActionPress}
+          style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+        >
           <Text style={styles.buttonText}>{actionLabel}</Text>
         </Pressable>
       ) : null}
@@ -34,7 +37,7 @@ const styles = StyleSheet.create({
     borderColor: '#d5ddd2',
     borderRadius: 18,
     borderWidth: 1,
-    marginTop: 16,
+    marginTop: 12,
     paddingHorizontal: 24,
     paddingVertical: 28,
   },

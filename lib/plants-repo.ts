@@ -183,6 +183,7 @@ export async function getPlantListItems(): Promise<PlantListItem[]> {
 
   return plants.map((plant) => {
     const plantTasks = pendingTasksByPlantId.get(plant.id) ?? [];
+    const nextTask = plantTasks[0] ?? null;
     const nextWateringDate =
       plantTasks.find((task) => task.type === CARE_TYPES.WATERING)?.scheduledDate ??
       getNextWateringDate(plant.lastWateringDate, plant.wateringIntervalDays);
@@ -191,6 +192,8 @@ export async function getPlantListItems(): Promise<PlantListItem[]> {
     return {
       ...plant,
       nextWateringDate,
+      nextTaskDate: nextTask?.scheduledDate ?? nextWateringDate,
+      nextTaskType: nextTask?.type ?? null,
       isOverdue: overdueTaskCount > 0 || isDateBeforeToday(nextWateringDate),
       overdueTaskCount,
     };

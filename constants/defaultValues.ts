@@ -6,6 +6,8 @@ export const DATABASE_NAME = 'plant-care.db';
 export const NOTIFICATION_CHANNEL_ID = 'plant-care-reminders';
 export const DEFAULT_WATERING_INTERVAL_DAYS = 7;
 export const DEFAULT_RISK_LEVEL: RiskLevel = 'low';
+export const BACKUP_SCHEMA_VERSION = 4;
+export const BACKUP_DIRECTORY_NAME = 'backups';
 
 export const DEFAULT_PLANT_FORM_VALUES: PlantFormValues = {
   name: '',

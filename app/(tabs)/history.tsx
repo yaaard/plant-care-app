@@ -1,12 +1,46 @@
+import { useDeferredValue, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 
 import { EmptyState } from '@/components/EmptyState';
+import { FilterChips, type FilterChipOption } from '@/components/FilterChips';
+import { SearchBar } from '@/components/SearchBar';
 import { SectionTitle } from '@/components/SectionTitle';
-import { getCareTypeLabel } from '@/constants/careTypes';
+import { CARE_TYPE_VALUES, type CareType } from '@/constants/careTypes';
 import { useLogs } from '@/hooks/useLogs';
+import { formatCareType, formatDisplayDate } from '@/lib/formatters';
+
+type HistoryFilterKey = 'all' | CareType;
+
+const FILTER_OPTIONS: FilterChipOption<HistoryFilterKey>[] = [
+  { key: 'all', label: 'Все' },
+  ...CARE_TYPE_VALUES.map((type) => ({
+    key: type,
+    label: formatCareType(type),
+  })),
+];
 
 export default function HistoryScreen() {
   const { logs, loading, error, reload } = useLogs();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterKey, setFilterKey] = useState<HistoryFilterKey>('all');
+  const deferredQuery = useDeferredValue(searchQuery);
+
+  const visibleLogs = useMemo(() => {
+    const normalizedQuery = deferredQuery.trim().toLowerCase();
+
+    return logs.filter((log) => {
+      const matchesQuery =
+        !normalizedQuery ||
+        [log.plantName, log.plantSpecies, log.comment]
+          .join(' ')
+          .toLowerCase()
+          .includes(normalizedQuery);
+
+      const matchesType = filterKey === 'all' || log.actionType === filterKey;
+
+      return matchesQuery && matchesType;
+    });
+  }, [deferredQuery, filterKey, logs]);
 
   if (loading && logs.length === 0) {
     return (
@@ -23,17 +57,35 @@ export default function HistoryScreen() {
     <SafeAreaView style={styles.safeArea}>
       <FlatList
         contentContainerStyle={styles.listContent}
-        data={logs}
+        data={visibleLogs}
         keyExtractor={(item) => item.id}
         ListEmptyComponent={
           <EmptyState
-            description="После первых выполненных действий здесь появится локальная история ухода по всем растениям."
-            title="Журнал пока пуст"
+            description={
+              logs.length === 0
+                ? 'После первых выполненных действий здесь появится локальная история ухода по всем растениям.'
+                : 'Попробуйте изменить поиск или фильтр по типу действия.'
+            }
+            title={logs.length === 0 ? 'Журнал пока пуст' : 'По вашему запросу ничего не найдено'}
           />
         }
         ListHeaderComponent={
           <View style={styles.header}>
             <SectionTitle title="История ухода" />
+
+            <SearchBar
+              onChangeText={setSearchQuery}
+              placeholder="Поиск по растению или комментарию"
+              value={searchQuery}
+            />
+
+            <FilterChips
+              label="Тип действия"
+              onSelect={setFilterKey}
+              options={FILTER_OPTIONS}
+              selectedKey={filterKey}
+            />
+
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
           </View>
         }
@@ -45,7 +97,7 @@ export default function HistoryScreen() {
           <View style={styles.card}>
             <Text style={styles.title}>{item.plantName}</Text>
             <Text style={styles.subtitle}>
-              {getCareTypeLabel(item.actionType)} • {item.actionDate}
+              {formatCareType(item.actionType)} • {formatDisplayDate(item.actionDate)}
             </Text>
             <Text style={styles.species}>{item.plantSpecies}</Text>
             {item.comment ? <Text style={styles.comment}>{item.comment}</Text> : null}

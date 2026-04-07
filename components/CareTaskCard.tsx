@@ -1,8 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { RiskBadge } from '@/components/RiskBadge';
-import { getCareTypeLabel } from '@/constants/careTypes';
-import { formatDateLabel, isDateBeforeToday } from '@/lib/date';
+import { formatCareType, formatTaskDate } from '@/lib/formatters';
+import { isDateBeforeToday } from '@/lib/date';
 import type { CareTask, CareTaskWithPlant } from '@/types/task';
 
 type CareTaskCardProps = {
@@ -34,7 +34,7 @@ export function CareTaskCard({
         style={({ pressed }) => [pressed && onPress && styles.pressed]}
       >
         <View style={styles.header}>
-          <Text style={styles.title}>{getCareTypeLabel(task.type)}</Text>
+          <Text style={styles.title}>{formatCareType(task.type)}</Text>
           <Text style={[styles.status, overdue && styles.overdueStatus]}>
             {task.isCompleted ? 'Выполнено' : overdue ? 'Просрочено' : 'Активно'}
           </Text>
@@ -50,13 +50,11 @@ export function CareTaskCard({
           </View>
         ) : null}
 
-        <Text style={styles.dateLabel}>Запланировано на</Text>
-        <Text style={styles.dateValue}>{formatDateLabel(task.scheduledDate)}</Text>
+        <Text style={styles.dateLabel}>Срок выполнения</Text>
+        <Text style={styles.dateValue}>{formatTaskDate(task.scheduledDate)}</Text>
 
         {task.isCompleted && task.completedAt ? (
-          <Text style={styles.completedText}>
-            Завершено: {task.completedAt.slice(0, 10)}
-          </Text>
+          <Text style={styles.completedText}>Завершено: {task.completedAt.slice(0, 10)}</Text>
         ) : null}
       </Pressable>
 
@@ -141,7 +139,7 @@ const styles = StyleSheet.create({
   },
   dateValue: {
     color: '#163020',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
   },
   completedText: {

@@ -13,18 +13,29 @@ export function todayString(): string {
   return formatDate(new Date());
 }
 
-export function parseDateString(value: string): Date {
+export function tryParseDateString(value: string | null | undefined): Date | null {
+  if (!value || !DATE_REGEXP.test(value)) {
+    return null;
+  }
+
   const [year, month, day] = value.split('-').map(Number);
-  return new Date(year, month - 1, day, 12, 0, 0, 0);
+  const parsedDate = new Date(year, month - 1, day, 12, 0, 0, 0);
+
+  return formatDate(parsedDate) === value ? parsedDate : null;
+}
+
+export function parseDateString(value: string): Date {
+  const parsedDate = tryParseDateString(value);
+
+  if (!parsedDate) {
+    throw new Error(`Некорректная дата: ${value}`);
+  }
+
+  return parsedDate;
 }
 
 export function isValidDateString(value: string): boolean {
-  if (!DATE_REGEXP.test(value)) {
-    return false;
-  }
-
-  const parsedDate = parseDateString(value);
-  return formatDate(parsedDate) === value;
+  return Boolean(tryParseDateString(value));
 }
 
 export function addDays(dateString: string, days: number): string {
@@ -51,8 +62,54 @@ export function getDaysSince(dateString: string | null): number | null {
   return differenceInDays(todayString(), dateString);
 }
 
+export function getDaysUntil(dateString: string | null): number | null {
+  if (!dateString || !isValidDateString(dateString)) {
+    return null;
+  }
+
+  return differenceInDays(dateString, todayString());
+}
+
 export function isDateBeforeToday(value: string): boolean {
-  return compareDateStrings(value, todayString()) < 0;
+  return isValidDateString(value) && compareDateStrings(value, todayString()) < 0;
+}
+
+export function isDateToday(value: string | null): boolean {
+  return Boolean(value && isValidDateString(value) && compareDateStrings(value, todayString()) === 0);
+}
+
+export function isDateTomorrow(value: string | null): boolean {
+  if (!value || !isValidDateString(value)) {
+    return false;
+  }
+
+  return compareDateStrings(value, addDays(todayString(), 1)) === 0;
+}
+
+export function getDateStatusLabel(value: string | null): string {
+  if (!value || !isValidDateString(value)) {
+    return 'Дата не указана';
+  }
+
+  if (isDateToday(value)) {
+    return 'Сегодня';
+  }
+
+  if (isDateTomorrow(value)) {
+    return 'Завтра';
+  }
+
+  const daysUntil = getDaysUntil(value);
+
+  if (daysUntil === null) {
+    return 'Дата не указана';
+  }
+
+  if (daysUntil < 0) {
+    return `Просрочено на ${Math.abs(daysUntil)} дн.`;
+  }
+
+  return `Через ${daysUntil} дн.`;
 }
 
 export function getNextWateringDate(
@@ -66,8 +123,8 @@ export function getNextWateringDate(
   return addDays(sourceDate, wateringIntervalDays);
 }
 
-export function formatDateLabel(value: string | null, fallback: string = 'Не указана') {
-  return value ?? fallback;
+export function formatDateLabel(value: string | null, fallback: string = 'Не указано') {
+  return value && isValidDateString(value) ? value : fallback;
 }
 
 export function combineDateAndTime(dateString: string, hour: number, minute: number): Date {
@@ -81,6 +138,10 @@ export function getNotificationDateForTask(
   notificationHour: number,
   notificationMinute: number
 ): Date | null {
+  if (!isValidDateString(scheduledDate)) {
+    return null;
+  }
+
   const targetDate = combineDateAndTime(scheduledDate, notificationHour, notificationMinute);
   const now = new Date();
 
