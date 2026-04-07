@@ -10,11 +10,7 @@ import { getErrorMessage } from '@/lib/validators';
 import { parseConditionTags, type PlantFormValues } from '@/types/plant';
 
 function normalizeParam(value: string | string[] | undefined) {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-
-  return value;
+  return Array.isArray(value) ? value[0] : value;
 }
 
 export default function EditPlantScreen() {

@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
+import { getCareTypeLabel } from '@/constants/careTypes';
 import { NOTIFICATION_CHANNEL_ID } from '@/constants/defaultValues';
 import { getNotificationDateForTask } from '@/lib/date';
 import { getSettings } from '@/lib/settings-repo';
@@ -31,7 +32,7 @@ async function ensureAndroidChannelAsync() {
   }
 
   await Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL_ID, {
-    name: 'Напоминания о поливе',
+    name: 'Напоминания по уходу',
     importance: Notifications.AndroidImportance.DEFAULT,
     description: 'Локальные напоминания о задачах по уходу за растениями',
   });
@@ -98,10 +99,12 @@ export async function refreshScheduledNotificationsAsync() {
       continue;
     }
 
+    const careLabel = getCareTypeLabel(task.type);
+
     await Notifications.scheduleNotificationAsync({
       identifier: task.id,
       content: {
-        title: 'Пора полить растение',
+        title: `Пора выполнить: ${careLabel}`,
         body: `${task.plantName} (${task.plantSpecies}) требует внимания.`,
         data: {
           plantId: task.plantId,

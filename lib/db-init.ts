@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS } from '@/constants/defaultValues';
+import { DEFAULT_RISK_LEVEL, DEFAULT_SETTINGS } from '@/constants/defaultValues';
 import { getDatabase } from '@/lib/db';
 
 let initializationPromise: Promise<void> | null = null;
@@ -9,11 +9,34 @@ async function ensurePlantColumns() {
   const columnNames = new Set(columns.map((column) => column.name));
 
   const nextColumns = [
-    { name: 'lightCondition', sql: 'ALTER TABLE plants ADD COLUMN lightCondition TEXT NOT NULL DEFAULT \'\'' },
-    { name: 'humidityCondition', sql: 'ALTER TABLE plants ADD COLUMN humidityCondition TEXT NOT NULL DEFAULT \'\'' },
-    { name: 'roomTemperature', sql: 'ALTER TABLE plants ADD COLUMN roomTemperature TEXT NOT NULL DEFAULT \'\'' },
-    { name: 'conditionTags', sql: 'ALTER TABLE plants ADD COLUMN conditionTags TEXT NOT NULL DEFAULT \'[]\'' },
-    { name: 'customCareComment', sql: 'ALTER TABLE plants ADD COLUMN customCareComment TEXT NOT NULL DEFAULT \'\'' },
+    {
+      name: 'lightCondition',
+      sql: "ALTER TABLE plants ADD COLUMN lightCondition TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: 'humidityCondition',
+      sql: "ALTER TABLE plants ADD COLUMN humidityCondition TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: 'roomTemperature',
+      sql: "ALTER TABLE plants ADD COLUMN roomTemperature TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: 'conditionTags',
+      sql: "ALTER TABLE plants ADD COLUMN conditionTags TEXT NOT NULL DEFAULT '[]'",
+    },
+    {
+      name: 'customCareComment',
+      sql: "ALTER TABLE plants ADD COLUMN customCareComment TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: 'riskLevel',
+      sql: `ALTER TABLE plants ADD COLUMN riskLevel TEXT NOT NULL DEFAULT '${DEFAULT_RISK_LEVEL}'`,
+    },
+    {
+      name: 'lastInspectionDate',
+      sql: 'ALTER TABLE plants ADD COLUMN lastInspectionDate TEXT',
+    },
   ];
 
   for (const column of nextColumns) {
@@ -21,6 +44,23 @@ async function ensurePlantColumns() {
       await database.execAsync(column.sql);
     }
   }
+}
+
+async function ensureIndexes() {
+  const database = await getDatabase();
+
+  await database.execAsync(`
+    CREATE INDEX IF NOT EXISTS idx_plants_name ON plants(name);
+    CREATE INDEX IF NOT EXISTS idx_plants_risk_level ON plants(riskLevel);
+    CREATE INDEX IF NOT EXISTS idx_care_tasks_scheduled_date ON care_tasks(scheduledDate);
+    CREATE INDEX IF NOT EXISTS idx_care_tasks_plant_id ON care_tasks(plantId);
+    CREATE INDEX IF NOT EXISTS idx_care_logs_plant_id ON care_logs(plantId);
+    CREATE INDEX IF NOT EXISTS idx_care_logs_action_date ON care_logs(actionDate);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_care_task
+    ON care_tasks(plantId, type, scheduledDate)
+    WHERE isCompleted = 0;
+  `);
 }
 
 export async function initializeDatabase(): Promise<void> {
@@ -44,6 +84,8 @@ export async function initializeDatabase(): Promise<void> {
           roomTemperature TEXT NOT NULL DEFAULT '',
           conditionTags TEXT NOT NULL DEFAULT '[]',
           customCareComment TEXT NOT NULL DEFAULT '',
+          riskLevel TEXT NOT NULL DEFAULT 'low',
+          lastInspectionDate TEXT,
           createdAt TEXT NOT NULL,
           updatedAt TEXT NOT NULL
         );
@@ -75,19 +117,10 @@ export async function initializeDatabase(): Promise<void> {
           notificationHour INTEGER NOT NULL,
           notificationMinute INTEGER NOT NULL
         );
-
-        CREATE INDEX IF NOT EXISTS idx_plants_name ON plants(name);
-        CREATE INDEX IF NOT EXISTS idx_care_tasks_scheduled_date ON care_tasks(scheduledDate);
-        CREATE INDEX IF NOT EXISTS idx_care_tasks_plant_id ON care_tasks(plantId);
-        CREATE INDEX IF NOT EXISTS idx_care_logs_plant_id ON care_logs(plantId);
-        CREATE INDEX IF NOT EXISTS idx_care_logs_action_date ON care_logs(actionDate);
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_watering_task
-        ON care_tasks(plantId, type, scheduledDate)
-        WHERE isCompleted = 0;
       `);
 
       await ensurePlantColumns();
+      await ensureIndexes();
 
       await database.runAsync(
         `

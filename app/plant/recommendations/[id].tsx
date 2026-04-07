@@ -5,18 +5,21 @@ import { Stack, type Href, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { EmptyState } from '@/components/EmptyState';
 import { RecommendationCard } from '@/components/RecommendationCard';
+import { RiskBadge } from '@/components/RiskBadge';
+import { getCareTypeLabel } from '@/constants/careTypes';
 import { getPlantGuideEntryByName } from '@/constants/plantGuide';
+import { getLogsByPlantId } from '@/lib/logs-repo';
 import { getPlantById } from '@/lib/plants-repo';
 import { buildPlantRecommendations } from '@/lib/recommendations';
+import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
+import { getTasksByPlantId } from '@/lib/tasks-repo';
 import { getErrorMessage } from '@/lib/validators';
+import type { CareLog } from '@/types/log';
 import type { Plant } from '@/types/plant';
+import type { CareTask } from '@/types/task';
 
 function normalizeParam(value: string | string[] | undefined) {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-
-  return value;
+  return Array.isArray(value) ? value[0] : value;
 }
 
 export default function PlantRecommendationsScreen() {
@@ -25,10 +28,12 @@ export default function PlantRecommendationsScreen() {
   const plantId = normalizeParam(params.id);
 
   const [plant, setPlant] = useState<Plant | null>(null);
+  const [tasks, setTasks] = useState<CareTask[]>([]);
+  const [logs, setLogs] = useState<CareLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const loadPlant = useCallback(async () => {
+  const loadData = useCallback(async () => {
     if (!plantId) {
       setErrorMessage('Не удалось определить растение.');
       setLoading(false);
@@ -38,8 +43,15 @@ export default function PlantRecommendationsScreen() {
     setLoading(true);
 
     try {
-      const nextPlant = await getPlantById(plantId);
+      const [nextPlant, nextTasks, nextLogs] = await Promise.all([
+        getPlantById(plantId),
+        getTasksByPlantId(plantId),
+        getLogsByPlantId(plantId),
+      ]);
+
       setPlant(nextPlant);
+      setTasks(nextTasks);
+      setLogs(nextLogs);
       setErrorMessage(null);
     } catch (error) {
       setErrorMessage(getErrorMessage(error, 'Не удалось загрузить рекомендации.'));
@@ -50,17 +62,30 @@ export default function PlantRecommendationsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void loadPlant();
-    }, [loadPlant])
+      void loadData();
+    }, [loadData])
   );
 
   const guideEntry = useMemo(
     () => (plant ? getPlantGuideEntryByName(plant.species) : null),
     [plant]
   );
+  const riskAssessment = useMemo(
+    () => (plant ? buildPlantRiskAssessment(plant, tasks, logs, guideEntry) : null),
+    [guideEntry, logs, plant, tasks]
+  );
   const recommendation = useMemo(
-    () => (plant ? buildPlantRecommendations(plant, guideEntry) : null),
-    [guideEntry, plant]
+    () =>
+      plant && riskAssessment
+        ? buildPlantRecommendations({
+            plant,
+            tasks,
+            logs,
+            guideEntry,
+            riskAssessment,
+          })
+        : null,
+    [guideEntry, logs, plant, riskAssessment, tasks]
   );
 
   if (loading && !plant) {
@@ -74,16 +99,16 @@ export default function PlantRecommendationsScreen() {
     );
   }
 
-  if (!plant || !recommendation) {
+  if (!plant || !recommendation || !riskAssessment) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <Stack.Screen options={{ title: 'Рекомендации по уходу' }} />
         <View style={styles.content}>
           <EmptyState
-            title="Рекомендации недоступны"
-            description={errorMessage ?? 'Растение не найдено или уже было удалено.'}
             actionLabel="Вернуться к растениям"
+            description={errorMessage ?? 'Растение не найдено или уже было удалено.'}
             onActionPress={() => router.replace('/(tabs)/plants' as Href)}
+            title="Рекомендации недоступны"
           />
         </View>
       </SafeAreaView>
@@ -96,12 +121,18 @@ export default function PlantRecommendationsScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryTitle}>{plant.name}</Text>
-          <Text style={styles.summarySpecies}>{plant.species}</Text>
+          <View style={styles.summaryHeader}>
+            <View style={styles.summaryTextBlock}>
+              <Text style={styles.summaryTitle}>{plant.name}</Text>
+              <Text style={styles.summarySpecies}>{plant.species}</Text>
+            </View>
+            <RiskBadge level={riskAssessment.riskLevel} />
+          </View>
+
           <Text style={styles.summaryText}>{recommendation.summary}</Text>
           <Text style={styles.noteText}>
-            Советы носят ориентировочный характер и основаны на локальных правилах, а не на
-            профессиональной диагностике.
+            Советы носят ориентировочный характер и основаны на локальных правилах, без внешних
+            AI-сервисов и удалённой диагностики.
           </Text>
         </View>
 
@@ -115,42 +146,30 @@ export default function PlantRecommendationsScreen() {
             <Text style={styles.referenceText}>Влажность: {guideEntry.humidityLevel}</Text>
             <Text style={styles.referenceText}>Температура: {guideEntry.temperatureRange}</Text>
           </View>
-        ) : (
-          <View style={styles.referenceCard}>
-            <Text style={styles.referenceTitle}>Справка по виду</Text>
-            <Text style={styles.referenceText}>
-              Для этого вида не найдено точного совпадения в локальном справочнике, поэтому советы
-              остаются более общими.
-            </Text>
-          </View>
-        )}
+        ) : null}
 
         <RecommendationCard title="Полив" content={recommendation.wateringAdvice} />
         <RecommendationCard title="Освещение" content={recommendation.lightAdvice} />
         <RecommendationCard title="Влажность" content={recommendation.humidityAdvice} />
         <RecommendationCard
-          title="Возможные риски"
-          content={
-            recommendation.riskWarnings.length === 0
-              ? 'Явных рисков по текущим данным не выявлено, но режим ухода всё равно стоит периодически пересматривать.'
-              : undefined
-          }
           items={recommendation.riskWarnings}
+          title="Возможные риски"
           tone={recommendation.riskWarnings.length > 0 ? 'warning' : 'success'}
         />
         <RecommendationCard
-          title="Возможные причины проблем"
-          content={
-            recommendation.diagnosisHints.length === 0
-              ? 'Явных симптомов сейчас не отмечено. Сохраняйте стабильный режим и наблюдайте за изменениями.'
-              : undefined
-          }
           items={recommendation.diagnosisHints}
+          title="Возможные причины проблем"
         />
+        <RecommendationCard items={recommendation.priorityChecks} title="Что проверить сейчас" />
         <RecommendationCard
-          title="Персональные советы"
           items={recommendation.personalizedTips}
+          title="Персональные советы"
           tone="success"
+        />
+
+        <RecommendationCard
+          items={recommendation.suggestedCareTypes.map((type) => getCareTypeLabel(type))}
+          title="Рекомендуемые действия"
         />
       </ScrollView>
     </SafeAreaView>
@@ -186,6 +205,16 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 18,
   },
+  summaryHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  summaryTextBlock: {
+    flex: 1,
+    marginRight: 12,
+  },
   summaryTitle: {
     color: '#163020',
     fontSize: 22,
@@ -195,7 +224,6 @@ const styles = StyleSheet.create({
   summarySpecies: {
     color: '#667085',
     fontSize: 15,
-    marginBottom: 12,
   },
   summaryText: {
     color: '#163020',

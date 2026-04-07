@@ -9,9 +9,13 @@ export default function TabLayout() {
         headerShown: false,
         tabBarActiveTintColor: '#2f6f3e',
         tabBarInactiveTintColor: '#7a857d',
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: '600',
+        },
         tabBarStyle: {
           borderTopColor: '#d5ddd2',
-          height: 66,
+          height: 70,
           paddingBottom: 8,
           paddingTop: 8,
         },
@@ -27,7 +31,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="schedule"
         options={{
-          title: 'Задачи',
+          title: 'График',
           tabBarIcon: ({ color, size }) => (
             <Ionicons color={color} name="calendar-outline" size={size} />
           ),
@@ -38,6 +42,13 @@ export default function TabLayout() {
         options={{
           title: 'Справочник',
           tabBarIcon: ({ color, size }) => <Ionicons color={color} name="book-outline" size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="stats"
+        options={{
+          title: 'Статистика',
+          tabBarIcon: ({ color, size }) => <Ionicons color={color} name="stats-chart-outline" size={size} />,
         }}
       />
       <Tabs.Screen

@@ -1,13 +1,16 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { CARE_TYPE_LABELS } from '@/constants/careTypes';
-import { isDateBeforeToday } from '@/lib/date';
+import { RiskBadge } from '@/components/RiskBadge';
+import { getCareTypeLabel } from '@/constants/careTypes';
+import { formatDateLabel, isDateBeforeToday } from '@/lib/date';
 import type { CareTask, CareTaskWithPlant } from '@/types/task';
 
 type CareTaskCardProps = {
   task: CareTask | CareTaskWithPlant;
   onPress?: () => void;
   showPlantName?: boolean;
+  onComplete?: (task: CareTask | CareTaskWithPlant) => void;
+  completing?: boolean;
 };
 
 function hasPlantInfo(task: CareTask | CareTaskWithPlant): task is CareTaskWithPlant {
@@ -18,39 +21,61 @@ export function CareTaskCard({
   task,
   onPress,
   showPlantName = true,
+  onComplete,
+  completing = false,
 }: CareTaskCardProps) {
   const overdue = task.isCompleted === 0 && isDateBeforeToday(task.scheduledDate);
 
   return (
-    <Pressable
-      disabled={!onPress}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.card,
-        overdue && styles.overdueCard,
-        pressed && onPress && styles.pressed,
-      ]}
-    >
-      <View style={styles.header}>
-        <Text style={styles.title}>{CARE_TYPE_LABELS[task.type]}</Text>
-        <Text style={[styles.status, overdue && styles.overdueStatus]}>
-          {task.isCompleted ? 'Выполнено' : overdue ? 'Просрочено' : 'Активно'}
-        </Text>
-      </View>
+    <View style={[styles.card, overdue && styles.overdueCard]}>
+      <Pressable
+        disabled={!onPress}
+        onPress={onPress}
+        style={({ pressed }) => [pressed && onPress && styles.pressed]}
+      >
+        <View style={styles.header}>
+          <Text style={styles.title}>{getCareTypeLabel(task.type)}</Text>
+          <Text style={[styles.status, overdue && styles.overdueStatus]}>
+            {task.isCompleted ? 'Выполнено' : overdue ? 'Просрочено' : 'Активно'}
+          </Text>
+        </View>
 
-      {showPlantName && hasPlantInfo(task) ? (
-        <Text style={styles.plantName}>
-          {task.plantName} - {task.plantSpecies}
-        </Text>
+        {showPlantName && hasPlantInfo(task) ? (
+          <View style={styles.plantRow}>
+            <View style={styles.plantMeta}>
+              <Text style={styles.plantName}>{task.plantName}</Text>
+              <Text style={styles.plantSpecies}>{task.plantSpecies}</Text>
+            </View>
+            <RiskBadge compact level={task.plantRiskLevel} />
+          </View>
+        ) : null}
+
+        <Text style={styles.dateLabel}>Запланировано на</Text>
+        <Text style={styles.dateValue}>{formatDateLabel(task.scheduledDate)}</Text>
+
+        {task.isCompleted && task.completedAt ? (
+          <Text style={styles.completedText}>
+            Завершено: {task.completedAt.slice(0, 10)}
+          </Text>
+        ) : null}
+      </Pressable>
+
+      {!task.isCompleted && onComplete ? (
+        <Pressable
+          disabled={completing}
+          onPress={() => onComplete(task)}
+          style={({ pressed }) => [
+            styles.completeButton,
+            completing && styles.completeButtonDisabled,
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text style={styles.completeButtonText}>
+            {completing ? 'Сохраняем...' : 'Отметить выполненным'}
+          </Text>
+        </Pressable>
       ) : null}
-
-      <Text style={styles.dateLabel}>Дата задачи</Text>
-      <Text style={styles.dateValue}>{task.scheduledDate}</Text>
-
-      {task.isCompleted && task.completedAt ? (
-        <Text style={styles.completedText}>Завершено: {task.completedAt.slice(0, 10)}</Text>
-      ) : null}
-    </Pressable>
+    </View>
   );
 }
 
@@ -89,10 +114,25 @@ const styles = StyleSheet.create({
   overdueStatus: {
     color: '#c2410c',
   },
-  plantName: {
-    color: '#667085',
-    fontSize: 14,
+  plantRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 10,
+  },
+  plantMeta: {
+    flex: 1,
+    marginRight: 12,
+  },
+  plantName: {
+    color: '#163020',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  plantSpecies: {
+    color: '#667085',
+    fontSize: 13,
+    marginTop: 2,
   },
   dateLabel: {
     color: '#667085',
@@ -108,5 +148,21 @@ const styles = StyleSheet.create({
     color: '#667085',
     fontSize: 12,
     marginTop: 8,
+  },
+  completeButton: {
+    alignItems: 'center',
+    backgroundColor: '#edf7ef',
+    borderRadius: 12,
+    justifyContent: 'center',
+    marginTop: 14,
+    minHeight: 44,
+  },
+  completeButtonDisabled: {
+    backgroundColor: '#dfeae2',
+  },
+  completeButtonText: {
+    color: '#2f6f3e',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

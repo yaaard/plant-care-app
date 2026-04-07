@@ -1,22 +1,32 @@
-import { CARE_TYPES } from '@/constants/careTypes';
-import { DEFAULT_WATERING_COMMENT } from '@/constants/defaultValues';
-import { getNextWateringDate, isDateBeforeToday } from '@/lib/date';
+import type { SQLiteDatabase } from 'expo-sqlite';
+
+import { CARE_TYPE_DEFAULT_COMMENTS, CARE_TYPES } from '@/constants/careTypes';
+import { DEFAULT_RISK_LEVEL } from '@/constants/defaultValues';
+import { getPlantGuideEntryByName } from '@/constants/plantGuide';
+import { buildAdaptiveCarePlan } from '@/lib/care-plan';
+import { getNextWateringDate, isDateBeforeToday, todayString } from '@/lib/date';
 import { createId, getDatabase, nowIsoString } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
-import { addCareLog } from '@/lib/logs-repo';
+import { addCareLog, getLogsByPlantId } from '@/lib/logs-repo';
 import { refreshScheduledNotificationsAsync } from '@/lib/notifications';
+import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
 import {
-  completeActiveWateringTasksForPlant,
-  createWateringTaskIfNeeded,
+  completeActiveTasksForPlantByType,
+  completeTaskById,
+  deleteActiveTasksForPlantByType,
   getPendingTasks,
-  replaceActiveWateringTaskForPlant,
+  getTaskById,
+  getTasksByPlantId,
+  replaceActiveTaskForPlantByType,
 } from '@/lib/tasks-repo';
 import {
   serializeConditionTags,
   type Plant,
   type PlantFormValues,
+  type PlantHealthFormValues,
   type PlantListItem,
 } from '@/types/plant';
+import type { RiskAssessmentResult } from '@/types/risk';
 
 const PLANT_SELECT_COLUMNS = `
   id,
@@ -31,28 +41,25 @@ const PLANT_SELECT_COLUMNS = `
   roomTemperature,
   conditionTags,
   customCareComment,
+  riskLevel,
+  lastInspectionDate,
   createdAt,
   updatedAt
 `;
 
-export async function getPlants(): Promise<Plant[]> {
-  await initializeDatabase();
-  const database = await getDatabase();
+async function resolveDatabase(database?: SQLiteDatabase) {
+  if (database) {
+    return database;
+  }
 
-  return database.getAllAsync<Plant>(
-    `
-      SELECT
-        ${PLANT_SELECT_COLUMNS}
-      FROM plants
-      ORDER BY name COLLATE NOCASE ASC, createdAt DESC
-    `
-  );
+  await initializeDatabase();
+  return getDatabase();
 }
 
-export async function getPlantById(id: string): Promise<Plant | null> {
-  await initializeDatabase();
-  const database = await getDatabase();
-
+async function getPlantByIdInternal(
+  id: string,
+  database: SQLiteDatabase
+): Promise<Plant | null> {
   return database.getFirstAsync<Plant>(
     `
       SELECT
@@ -65,32 +72,18 @@ export async function getPlantById(id: string): Promise<Plant | null> {
   );
 }
 
-export async function getPlantListItems(): Promise<PlantListItem[]> {
-  const [plants, pendingTasks] = await Promise.all([getPlants(), getPendingTasks()]);
-  const nextTaskByPlantId = new Map<string, string>();
-
-  pendingTasks.forEach((task) => {
-    if (!nextTaskByPlantId.has(task.plantId)) {
-      nextTaskByPlantId.set(task.plantId, task.scheduledDate);
-    }
-  });
-
-  return plants.map((plant) => {
-    const nextWateringDate =
-      nextTaskByPlantId.get(plant.id) ??
-      getNextWateringDate(plant.lastWateringDate, plant.wateringIntervalDays);
-
-    return {
-      ...plant,
-      nextWateringDate,
-      isOverdue: isDateBeforeToday(nextWateringDate),
-    };
-  });
-}
-
-function buildPlantRecord(values: PlantFormValues, id: string, createdAt: string, updatedAt: string): Plant {
+function buildPlantRecord(
+  values: PlantFormValues,
+  seed: {
+    id: string;
+    createdAt: string;
+    updatedAt: string;
+    riskLevel: Plant['riskLevel'];
+    lastInspectionDate: string | null;
+  }
+): Plant {
   return {
-    id,
+    id: seed.id,
     name: values.name,
     species: values.species,
     photoUri: values.photoUri,
@@ -102,21 +95,118 @@ function buildPlantRecord(values: PlantFormValues, id: string, createdAt: string
     roomTemperature: values.roomTemperature,
     conditionTags: serializeConditionTags(values.conditionTags),
     customCareComment: values.customCareComment,
-    createdAt,
-    updatedAt,
+    riskLevel: seed.riskLevel,
+    lastInspectionDate: seed.lastInspectionDate,
+    createdAt: seed.createdAt,
+    updatedAt: seed.updatedAt,
   };
 }
 
-export async function createPlant(values: PlantFormValues): Promise<Plant> {
-  await initializeDatabase();
-  const database = await getDatabase();
-  const timestamp = nowIsoString();
+async function syncPlantDerivedState(
+  plantId: string,
+  database: SQLiteDatabase
+): Promise<RiskAssessmentResult | null> {
+  const plant = await getPlantByIdInternal(plantId, database);
 
-  const plant = buildPlantRecord(values, createId('plant'), timestamp, timestamp);
-  const nextWateringDate = getNextWateringDate(
-    plant.lastWateringDate,
-    plant.wateringIntervalDays
+  if (!plant) {
+    return null;
+  }
+
+  const logs = await getLogsByPlantId(plantId, database);
+  const guideEntry = getPlantGuideEntryByName(plant.species);
+  const carePlan = buildAdaptiveCarePlan(plant, guideEntry, logs);
+
+  await replaceActiveTaskForPlantByType(
+    plantId,
+    CARE_TYPES.WATERING,
+    carePlan.taskDates[CARE_TYPES.WATERING] ?? getNextWateringDate(plant.lastWateringDate, plant.wateringIntervalDays),
+    database
   );
+
+  for (const type of [CARE_TYPES.INSPECTION, CARE_TYPES.SPRAYING, CARE_TYPES.FERTILIZING] as const) {
+    const scheduledDate = carePlan.taskDates[type];
+
+    if (scheduledDate) {
+      await replaceActiveTaskForPlantByType(plantId, type, scheduledDate, database);
+    } else {
+      await deleteActiveTasksForPlantByType(plantId, type, database);
+    }
+  }
+
+  const tasks = await getTasksByPlantId(plantId, database);
+  const riskAssessment = buildPlantRiskAssessment(plant, tasks, logs, guideEntry);
+
+  await database.runAsync(
+    `
+      UPDATE plants
+      SET riskLevel = ?, updatedAt = ?
+      WHERE id = ?
+    `,
+    riskAssessment.riskLevel,
+    nowIsoString(),
+    plantId
+  );
+
+  return riskAssessment;
+}
+
+export async function getPlants(database?: SQLiteDatabase): Promise<Plant[]> {
+  const activeDatabase = await resolveDatabase(database);
+
+  return activeDatabase.getAllAsync<Plant>(
+    `
+      SELECT
+        ${PLANT_SELECT_COLUMNS}
+      FROM plants
+      ORDER BY name COLLATE NOCASE ASC, createdAt DESC
+    `
+  );
+}
+
+export async function getPlantById(
+  id: string,
+  database?: SQLiteDatabase
+): Promise<Plant | null> {
+  const activeDatabase = await resolveDatabase(database);
+  return getPlantByIdInternal(id, activeDatabase);
+}
+
+export async function getPlantListItems(): Promise<PlantListItem[]> {
+  const [plants, pendingTasks] = await Promise.all([getPlants(), getPendingTasks()]);
+  const pendingTasksByPlantId = new Map<string, typeof pendingTasks>();
+
+  pendingTasks.forEach((task) => {
+    const currentTasks = pendingTasksByPlantId.get(task.plantId) ?? [];
+    currentTasks.push(task);
+    pendingTasksByPlantId.set(task.plantId, currentTasks);
+  });
+
+  return plants.map((plant) => {
+    const plantTasks = pendingTasksByPlantId.get(plant.id) ?? [];
+    const nextWateringDate =
+      plantTasks.find((task) => task.type === CARE_TYPES.WATERING)?.scheduledDate ??
+      getNextWateringDate(plant.lastWateringDate, plant.wateringIntervalDays);
+    const overdueTaskCount = plantTasks.filter((task) => isDateBeforeToday(task.scheduledDate)).length;
+
+    return {
+      ...plant,
+      nextWateringDate,
+      isOverdue: overdueTaskCount > 0 || isDateBeforeToday(nextWateringDate),
+      overdueTaskCount,
+    };
+  });
+}
+
+export async function createPlant(values: PlantFormValues): Promise<Plant> {
+  const database = await resolveDatabase();
+  const timestamp = nowIsoString();
+  const plant = buildPlantRecord(values, {
+    id: createId('plant'),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    riskLevel: DEFAULT_RISK_LEVEL,
+    lastInspectionDate: null,
+  });
 
   await database.withTransactionAsync(async () => {
     await database.runAsync(
@@ -134,9 +224,11 @@ export async function createPlant(values: PlantFormValues): Promise<Plant> {
           roomTemperature,
           conditionTags,
           customCareComment,
+          riskLevel,
+          lastInspectionDate,
           createdAt,
           updatedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       plant.id,
       plant.name,
@@ -150,32 +242,38 @@ export async function createPlant(values: PlantFormValues): Promise<Plant> {
       plant.roomTemperature,
       plant.conditionTags,
       plant.customCareComment,
+      plant.riskLevel,
+      plant.lastInspectionDate,
       plant.createdAt,
       plant.updatedAt
     );
 
-    await createWateringTaskIfNeeded(plant.id, nextWateringDate, database);
+    await syncPlantDerivedState(plant.id, database);
   });
 
   await refreshScheduledNotificationsAsync();
 
-  return plant;
+  return (await getPlantById(plant.id)) ?? plant;
 }
 
-export async function updatePlant(id: string, values: PlantFormValues): Promise<Plant | null> {
-  await initializeDatabase();
-  const database = await getDatabase();
-  const existingPlant = await getPlantById(id);
+export async function updatePlant(
+  id: string,
+  values: PlantFormValues
+): Promise<Plant | null> {
+  const database = await resolveDatabase();
+  const existingPlant = await getPlantByIdInternal(id, database);
 
   if (!existingPlant) {
     return null;
   }
 
-  const updatedPlant = buildPlantRecord(values, id, existingPlant.createdAt, nowIsoString());
-  const nextWateringDate = getNextWateringDate(
-    updatedPlant.lastWateringDate,
-    updatedPlant.wateringIntervalDays
-  );
+  const updatedPlant = buildPlantRecord(values, {
+    id,
+    createdAt: existingPlant.createdAt,
+    updatedAt: nowIsoString(),
+    riskLevel: existingPlant.riskLevel,
+    lastInspectionDate: existingPlant.lastInspectionDate,
+  });
 
   await database.withTransactionAsync(async () => {
     await database.runAsync(
@@ -193,6 +291,8 @@ export async function updatePlant(id: string, values: PlantFormValues): Promise<
           roomTemperature = ?,
           conditionTags = ?,
           customCareComment = ?,
+          riskLevel = ?,
+          lastInspectionDate = ?,
           updatedAt = ?
         WHERE id = ?
       `,
@@ -207,21 +307,22 @@ export async function updatePlant(id: string, values: PlantFormValues): Promise<
       updatedPlant.roomTemperature,
       updatedPlant.conditionTags,
       updatedPlant.customCareComment,
+      updatedPlant.riskLevel,
+      updatedPlant.lastInspectionDate,
       updatedPlant.updatedAt,
       updatedPlant.id
     );
 
-    await replaceActiveWateringTaskForPlant(updatedPlant.id, nextWateringDate, database);
+    await syncPlantDerivedState(updatedPlant.id, database);
   });
 
   await refreshScheduledNotificationsAsync();
 
-  return updatedPlant;
+  return getPlantById(id);
 }
 
 export async function deletePlant(id: string): Promise<void> {
-  await initializeDatabase();
-  const database = await getDatabase();
+  const database = await resolveDatabase();
 
   await database.runAsync('DELETE FROM plants WHERE id = ?', id);
   await refreshScheduledNotificationsAsync();
@@ -229,19 +330,17 @@ export async function deletePlant(id: string): Promise<void> {
 
 export async function markPlantAsWatered(
   plantId: string,
-  comment: string = DEFAULT_WATERING_COMMENT
+  comment: string = CARE_TYPE_DEFAULT_COMMENTS.watering
 ): Promise<Plant | null> {
-  await initializeDatabase();
-  const database = await getDatabase();
-  const plant = await getPlantById(plantId);
+  const database = await resolveDatabase();
+  const plant = await getPlantByIdInternal(plantId, database);
 
   if (!plant) {
     return null;
   }
 
-  const wateredAt = nowIsoString();
-  const actionDate = wateredAt.slice(0, 10);
-  const nextWateringDate = getNextWateringDate(actionDate, plant.wateringIntervalDays);
+  const completedAt = nowIsoString();
+  const actionDate = completedAt.slice(0, 10);
 
   await database.withTransactionAsync(async () => {
     await database.runAsync(
@@ -251,7 +350,7 @@ export async function markPlantAsWatered(
         WHERE id = ?
       `,
       actionDate,
-      wateredAt,
+      completedAt,
       plantId
     );
 
@@ -265,11 +364,150 @@ export async function markPlantAsWatered(
       database
     );
 
-    await completeActiveWateringTasksForPlant(plantId, wateredAt, database);
-    await createWateringTaskIfNeeded(plantId, nextWateringDate, database);
+    await completeActiveTasksForPlantByType(
+      plantId,
+      CARE_TYPES.WATERING,
+      completedAt,
+      database
+    );
+
+    await syncPlantDerivedState(plantId, database);
   });
 
   await refreshScheduledNotificationsAsync();
 
   return getPlantById(plantId);
+}
+
+export async function savePlantHealthState(
+  plantId: string,
+  values: PlantHealthFormValues
+): Promise<Plant | null> {
+  const database = await resolveDatabase();
+  const plant = await getPlantByIdInternal(plantId, database);
+
+  if (!plant) {
+    return null;
+  }
+
+  const completedAt = nowIsoString();
+  const actionDate = completedAt.slice(0, 10);
+  const comment = values.customCareComment.trim() || CARE_TYPE_DEFAULT_COMMENTS.inspection;
+
+  await database.withTransactionAsync(async () => {
+    await database.runAsync(
+      `
+        UPDATE plants
+        SET
+          conditionTags = ?,
+          customCareComment = ?,
+          lastInspectionDate = ?,
+          updatedAt = ?
+        WHERE id = ?
+      `,
+      serializeConditionTags(values.conditionTags),
+      values.customCareComment.trim(),
+      actionDate,
+      completedAt,
+      plantId
+    );
+
+    await addCareLog(
+      {
+        plantId,
+        actionType: CARE_TYPES.INSPECTION,
+        actionDate,
+        comment,
+      },
+      database
+    );
+
+    await completeActiveTasksForPlantByType(
+      plantId,
+      CARE_TYPES.INSPECTION,
+      completedAt,
+      database
+    );
+
+    await syncPlantDerivedState(plantId, database);
+  });
+
+  await refreshScheduledNotificationsAsync();
+
+  return getPlantById(plantId);
+}
+
+export async function completePlantTask(
+  taskId: string,
+  comment?: string
+): Promise<Plant | null> {
+  const database = await resolveDatabase();
+  const task = await getTaskById(taskId, database);
+
+  if (!task || task.isCompleted) {
+    return null;
+  }
+
+  const plant = await getPlantByIdInternal(task.plantId, database);
+
+  if (!plant) {
+    return null;
+  }
+
+  const completedAt = nowIsoString();
+  const actionDate = completedAt.slice(0, 10);
+
+  await database.withTransactionAsync(async () => {
+    if (task.type === CARE_TYPES.WATERING) {
+      await database.runAsync(
+        `
+          UPDATE plants
+          SET lastWateringDate = ?, updatedAt = ?
+          WHERE id = ?
+        `,
+        actionDate,
+        completedAt,
+        task.plantId
+      );
+    } else if (task.type === CARE_TYPES.INSPECTION) {
+      await database.runAsync(
+        `
+          UPDATE plants
+          SET lastInspectionDate = ?, updatedAt = ?
+          WHERE id = ?
+        `,
+        actionDate,
+        completedAt,
+        task.plantId
+      );
+    }
+
+    await addCareLog(
+      {
+        plantId: task.plantId,
+        actionType: task.type,
+        actionDate,
+        comment: comment?.trim() || CARE_TYPE_DEFAULT_COMMENTS[task.type],
+      },
+      database
+    );
+
+    await completeTaskById(task.id, completedAt, database);
+    await syncPlantDerivedState(task.plantId, database);
+  });
+
+  await refreshScheduledNotificationsAsync();
+
+  return getPlantById(task.plantId);
+}
+
+export async function refreshAllPlantCareState(): Promise<void> {
+  const database = await resolveDatabase();
+  const plants = await getPlants(database);
+
+  await database.withTransactionAsync(async () => {
+    for (const plant of plants) {
+      await syncPlantDerivedState(plant.id, database);
+    }
+  });
 }

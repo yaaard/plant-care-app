@@ -20,12 +20,18 @@ export function RecommendationCard({
   }
 
   return (
-    <View style={[styles.card, tone === 'warning' && styles.warningCard, tone === 'success' && styles.successCard]}>
+    <View
+      style={[
+        styles.card,
+        tone === 'warning' && styles.warningCard,
+        tone === 'success' && styles.successCard,
+      ]}
+    >
       <Text style={styles.title}>{title}</Text>
       {content ? <Text style={styles.content}>{content}</Text> : null}
       {items.map((item) => (
         <Text key={item} style={styles.item}>
-          - {item}
+          • {item}
         </Text>
       ))}
     </View>

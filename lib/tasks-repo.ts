@@ -1,9 +1,10 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { CARE_TYPES } from '@/constants/careTypes';
+import { CARE_TYPES, type CareType } from '@/constants/careTypes';
+import { todayString } from '@/lib/date';
 import { createId, getDatabase, nowIsoString } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
-import type { CareTask, CareTaskWithPlant } from '@/types/task';
+import type { CareTask, CareTaskType, CareTaskWithPlant } from '@/types/task';
 
 async function resolveDatabase(database?: SQLiteDatabase) {
   if (database) {
@@ -14,10 +15,10 @@ async function resolveDatabase(database?: SQLiteDatabase) {
   return getDatabase();
 }
 
-export async function getPendingTasks(): Promise<CareTaskWithPlant[]> {
-  const database = await resolveDatabase();
+export async function getPendingTasks(database?: SQLiteDatabase): Promise<CareTaskWithPlant[]> {
+  const activeDatabase = await resolveDatabase(database);
 
-  return database.getAllAsync<CareTaskWithPlant>(
+  return activeDatabase.getAllAsync<CareTaskWithPlant>(
     `
       SELECT
         care_tasks.id,
@@ -29,7 +30,8 @@ export async function getPendingTasks(): Promise<CareTaskWithPlant[]> {
         care_tasks.createdAt,
         plants.name AS plantName,
         plants.species AS plantSpecies,
-        plants.photoUri AS plantPhotoUri
+        plants.photoUri AS plantPhotoUri,
+        plants.riskLevel AS plantRiskLevel
       FROM care_tasks
       INNER JOIN plants ON plants.id = care_tasks.plantId
       WHERE care_tasks.isCompleted = 0
@@ -38,10 +40,30 @@ export async function getPendingTasks(): Promise<CareTaskWithPlant[]> {
   );
 }
 
-export async function getTasksByPlantId(plantId: string): Promise<CareTask[]> {
-  const database = await resolveDatabase();
+export async function getTaskById(
+  taskId: string,
+  database?: SQLiteDatabase
+): Promise<CareTask | null> {
+  const activeDatabase = await resolveDatabase(database);
 
-  return database.getAllAsync<CareTask>(
+  return activeDatabase.getFirstAsync<CareTask>(
+    `
+      SELECT id, plantId, type, scheduledDate, isCompleted, completedAt, createdAt
+      FROM care_tasks
+      WHERE id = ?
+      LIMIT 1
+    `,
+    taskId
+  );
+}
+
+export async function getTasksByPlantId(
+  plantId: string,
+  database?: SQLiteDatabase
+): Promise<CareTask[]> {
+  const activeDatabase = await resolveDatabase(database);
+
+  return activeDatabase.getAllAsync<CareTask>(
     `
       SELECT id, plantId, type, scheduledDate, isCompleted, completedAt, createdAt
       FROM care_tasks
@@ -52,8 +74,9 @@ export async function getTasksByPlantId(plantId: string): Promise<CareTask[]> {
   );
 }
 
-export async function createWateringTaskIfNeeded(
+export async function createCareTaskIfNeeded(
   plantId: string,
+  type: CareTaskType,
   scheduledDate: string,
   database?: SQLiteDatabase
 ): Promise<CareTask> {
@@ -67,7 +90,7 @@ export async function createWateringTaskIfNeeded(
       LIMIT 1
     `,
     plantId,
-    CARE_TYPES.WATERING,
+    type,
     scheduledDate
   );
 
@@ -78,7 +101,7 @@ export async function createWateringTaskIfNeeded(
   const task: CareTask = {
     id: createId('task'),
     plantId,
-    type: CARE_TYPES.WATERING,
+    type,
     scheduledDate,
     isCompleted: 0,
     completedAt: null,
@@ -109,8 +132,56 @@ export async function createWateringTaskIfNeeded(
   return task;
 }
 
-export async function completeActiveWateringTasksForPlant(
+export async function deleteActiveTasksForPlantByType(
   plantId: string,
+  type: CareType,
+  database?: SQLiteDatabase
+): Promise<void> {
+  const activeDatabase = await resolveDatabase(database);
+
+  await activeDatabase.runAsync(
+    `
+      DELETE FROM care_tasks
+      WHERE plantId = ? AND type = ? AND isCompleted = 0
+    `,
+    plantId,
+    type
+  );
+}
+
+export async function replaceActiveTaskForPlantByType(
+  plantId: string,
+  type: CareType,
+  scheduledDate: string,
+  database?: SQLiteDatabase
+): Promise<void> {
+  const activeDatabase = await resolveDatabase(database);
+
+  await deleteActiveTasksForPlantByType(plantId, type, activeDatabase);
+  await createCareTaskIfNeeded(plantId, type, scheduledDate, activeDatabase);
+}
+
+export async function completeTaskById(
+  taskId: string,
+  completedAt: string,
+  database?: SQLiteDatabase
+): Promise<void> {
+  const activeDatabase = await resolveDatabase(database);
+
+  await activeDatabase.runAsync(
+    `
+      UPDATE care_tasks
+      SET isCompleted = 1, completedAt = ?
+      WHERE id = ?
+    `,
+    completedAt,
+    taskId
+  );
+}
+
+export async function completeActiveTasksForPlantByType(
+  plantId: string,
+  type: CareType,
   completedAt: string,
   database?: SQLiteDatabase
 ): Promise<void> {
@@ -124,25 +195,22 @@ export async function completeActiveWateringTasksForPlant(
     `,
     completedAt,
     plantId,
-    CARE_TYPES.WATERING
+    type
   );
 }
 
-export async function replaceActiveWateringTaskForPlant(
-  plantId: string,
-  scheduledDate: string,
-  database?: SQLiteDatabase
-): Promise<void> {
+export async function getOverdueTasksCount(database?: SQLiteDatabase): Promise<number> {
   const activeDatabase = await resolveDatabase(database);
+  const today = todayString();
 
-  await activeDatabase.runAsync(
+  const result = await activeDatabase.getFirstAsync<{ count: number }>(
     `
-      DELETE FROM care_tasks
-      WHERE plantId = ? AND type = ? AND isCompleted = 0
+      SELECT COUNT(*) AS count
+      FROM care_tasks
+      WHERE isCompleted = 0 AND scheduledDate < ?
     `,
-    plantId,
-    CARE_TYPES.WATERING
+    today
   );
 
-  await createWateringTaskIfNeeded(plantId, scheduledDate, activeDatabase);
+  return result?.count ?? 0;
 }

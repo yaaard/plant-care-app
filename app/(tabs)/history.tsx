@@ -2,7 +2,7 @@ import { ActivityIndicator, FlatList, SafeAreaView, StyleSheet, Text, View } fro
 
 import { EmptyState } from '@/components/EmptyState';
 import { SectionTitle } from '@/components/SectionTitle';
-import { CARE_TYPE_LABELS } from '@/constants/careTypes';
+import { getCareTypeLabel } from '@/constants/careTypes';
 import { useLogs } from '@/hooks/useLogs';
 
 export default function HistoryScreen() {
@@ -27,7 +27,7 @@ export default function HistoryScreen() {
         keyExtractor={(item) => item.id}
         ListEmptyComponent={
           <EmptyState
-            description="После первого отмеченного полива здесь появится история действий по всем растениям."
+            description="После первых выполненных действий здесь появится локальная история ухода по всем растениям."
             title="Журнал пока пуст"
           />
         }
@@ -45,8 +45,9 @@ export default function HistoryScreen() {
           <View style={styles.card}>
             <Text style={styles.title}>{item.plantName}</Text>
             <Text style={styles.subtitle}>
-              {CARE_TYPE_LABELS[item.actionType]} - {item.actionDate}
+              {getCareTypeLabel(item.actionType)} • {item.actionDate}
             </Text>
+            <Text style={styles.species}>{item.plantSpecies}</Text>
             {item.comment ? <Text style={styles.comment}>{item.comment}</Text> : null}
           </View>
         )}
@@ -83,8 +84,14 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   subtitle: {
-    color: '#667085',
+    color: '#435249',
     fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  species: {
+    color: '#667085',
+    fontSize: 13,
     marginBottom: 8,
   },
   comment: {

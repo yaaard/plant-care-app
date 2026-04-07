@@ -12,9 +12,8 @@ import {
 
 import { EmptyState } from '@/components/EmptyState';
 import { FormField } from '@/components/FormField';
-import { TagSelector } from '@/components/TagSelector';
+import { HealthTagSelector } from '@/components/HealthTagSelector';
 import {
-  CONDITION_TAG_OPTIONS,
   HUMIDITY_CONDITION_OPTIONS,
   LIGHT_CONDITION_OPTIONS,
   PLANT_GUIDE,
@@ -23,7 +22,7 @@ import { DEFAULT_PLANT_FORM_VALUES } from '@/constants/defaultValues';
 import { todayString } from '@/lib/date';
 import { pickImageFromLibraryAsync } from '@/lib/image-picker';
 import { normalizePlantFormValues, validatePlantForm } from '@/lib/validators';
-import type { PlantConditionTag, PlantFormValues } from '@/types/plant';
+import type { PlantFormValues } from '@/types/plant';
 
 type PlantFormProps = {
   initialValues?: PlantFormValues;
@@ -90,9 +89,7 @@ export function PlantForm({
   const [lightCondition, setLightCondition] = useState(initialValues.lightCondition);
   const [humidityCondition, setHumidityCondition] = useState(initialValues.humidityCondition);
   const [roomTemperature, setRoomTemperature] = useState(initialValues.roomTemperature);
-  const [conditionTags, setConditionTags] = useState<PlantConditionTag[]>(
-    initialValues.conditionTags
-  );
+  const [conditionTags, setConditionTags] = useState(initialValues.conditionTags);
   const [customCareComment, setCustomCareComment] = useState(initialValues.customCareComment);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
@@ -124,9 +121,13 @@ export function PlantForm({
 
     const guideEntry = PLANT_GUIDE.find((item) => item.name === guideName);
 
-    if (guideEntry) {
-      setWateringIntervalDays(String(guideEntry.recommendedWateringIntervalDays));
+    if (!guideEntry) {
+      return;
     }
+
+    setWateringIntervalDays(String(guideEntry.recommendedWateringIntervalDays));
+    setLightCondition((currentValue) => currentValue || guideEntry.lightLevel);
+    setHumidityCondition((currentValue) => currentValue || guideEntry.humidityLevel);
   };
 
   const handleSubmit = async () => {
@@ -211,8 +212,8 @@ export function PlantForm({
         <View style={styles.guideCard}>
           <Text style={styles.guideTitle}>Вид из локального справочника</Text>
           <Text style={styles.guideSubtitle}>
-            Можно выбрать готовый вариант, а затем при необходимости скорректировать интервал
-            полива вручную.
+            Можно выбрать распространённый вид, чтобы сразу подставить базовые ориентиры по
+            поливу и условиям.
           </Text>
 
           <View style={styles.optionsWrap}>
@@ -247,7 +248,7 @@ export function PlantForm({
         />
 
         <FormField
-          helperText="Формат: YYYY-MM-DD. Можно оставить пустым, тогда расчёт пойдёт от сегодняшней даты."
+          helperText="Формат: YYYY-MM-DD. Если оставить поле пустым, расчёт стартует от сегодняшней даты."
           label="Дата последнего полива"
           onChangeText={setLastWateringDate}
           placeholder="2026-04-06"
@@ -290,15 +291,12 @@ export function PlantForm({
           value={roomTemperature}
         />
 
-        <View style={styles.groupBlock}>
-          <Text style={styles.groupLabel}>Признаки состояния растения</Text>
-          <Text style={styles.groupHelper}>Отметьте только то, что действительно наблюдаете сейчас.</Text>
-          <TagSelector
-            onChange={setConditionTags}
-            options={CONDITION_TAG_OPTIONS}
-            selectedTags={conditionTags}
-          />
-        </View>
+        <HealthTagSelector
+          helperText="Отмечайте только те признаки, которые реально наблюдаете сейчас."
+          label="Признаки состояния растения"
+          onChange={setConditionTags}
+          selectedTags={conditionTags}
+        />
 
         <FormField
           label="Дополнительный комментарий для анализа"
@@ -320,7 +318,7 @@ export function PlantForm({
           <View style={styles.errorBox}>
             {validationErrors.map((error) => (
               <Text key={error} style={styles.errorText}>
-                - {error}
+                • {error}
               </Text>
             ))}
           </View>
@@ -463,12 +461,6 @@ const styles = StyleSheet.create({
     color: '#163020',
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 8,
-  },
-  groupHelper: {
-    color: '#667085',
-    fontSize: 12,
-    lineHeight: 18,
     marginBottom: 8,
   },
   linkButton: {

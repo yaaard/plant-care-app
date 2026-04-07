@@ -1,25 +1,11 @@
 import { DEFAULT_SETTINGS } from '@/constants/defaultValues';
 import { isValidDateString } from '@/lib/date';
 import {
-  PLANT_CONDITION_TAG_VALUES,
-  type PlantConditionTag,
+  normalizeConditionTags,
   type PlantFormValues,
+  type PlantHealthFormValues,
 } from '@/types/plant';
 import type { AppSettings, SettingsFormValues } from '@/types/settings';
-
-function normalizeTagList(tags: PlantConditionTag[]): PlantConditionTag[] {
-  const uniqueTags = Array.from(
-    new Set(
-      tags.filter((tag): tag is PlantConditionTag => PLANT_CONDITION_TAG_VALUES.includes(tag))
-    )
-  );
-
-  if (uniqueTags.includes('healthy') && uniqueTags.length > 1) {
-    return uniqueTags.filter((tag) => tag !== 'healthy');
-  }
-
-  return uniqueTags;
-}
 
 export function normalizePlantFormValues(values: PlantFormValues): PlantFormValues {
   return {
@@ -32,7 +18,7 @@ export function normalizePlantFormValues(values: PlantFormValues): PlantFormValu
     lightCondition: values.lightCondition.trim(),
     humidityCondition: values.humidityCondition.trim(),
     roomTemperature: values.roomTemperature.trim(),
-    conditionTags: normalizeTagList(values.conditionTags),
+    conditionTags: normalizeConditionTags(values.conditionTags),
     customCareComment: values.customCareComment.trim(),
   };
 }
@@ -61,6 +47,24 @@ export function validatePlantForm(values: PlantFormValues): string[] {
     !isValidDateString(normalizedValues.lastWateringDate)
   ) {
     errors.push('Дата последнего полива должна быть в формате YYYY-MM-DD.');
+  }
+
+  return errors;
+}
+
+export function normalizePlantHealthValues(values: PlantHealthFormValues): PlantHealthFormValues {
+  return {
+    conditionTags: normalizeConditionTags(values.conditionTags),
+    customCareComment: values.customCareComment.trim(),
+  };
+}
+
+export function validatePlantHealthValues(values: PlantHealthFormValues): string[] {
+  const normalizedValues = normalizePlantHealthValues(values);
+  const errors: string[] = [];
+
+  if (normalizedValues.conditionTags.length === 0) {
+    errors.push('Отметьте хотя бы один тег состояния растения.');
   }
 
   return errors;

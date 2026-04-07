@@ -1,4 +1,6 @@
-export type CareActionType = 'watering';
+import type { CareType } from '@/constants/careTypes';
+
+export type CareActionType = CareType;
 
 export interface CareLog {
   id: string;

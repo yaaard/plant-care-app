@@ -13,10 +13,10 @@ async function resolveDatabase(database?: SQLiteDatabase) {
   return getDatabase();
 }
 
-export async function getLogs(): Promise<CareLogWithPlant[]> {
-  const database = await resolveDatabase();
+export async function getLogs(database?: SQLiteDatabase): Promise<CareLogWithPlant[]> {
+  const activeDatabase = await resolveDatabase(database);
 
-  return database.getAllAsync<CareLogWithPlant>(
+  return activeDatabase.getAllAsync<CareLogWithPlant>(
     `
       SELECT
         care_logs.id,
@@ -34,10 +34,13 @@ export async function getLogs(): Promise<CareLogWithPlant[]> {
   );
 }
 
-export async function getLogsByPlantId(plantId: string): Promise<CareLog[]> {
-  const database = await resolveDatabase();
+export async function getLogsByPlantId(
+  plantId: string,
+  database?: SQLiteDatabase
+): Promise<CareLog[]> {
+  const activeDatabase = await resolveDatabase(database);
 
-  return database.getAllAsync<CareLog>(
+  return activeDatabase.getAllAsync<CareLog>(
     `
       SELECT id, plantId, actionType, actionDate, comment, createdAt
       FROM care_logs
@@ -46,6 +49,28 @@ export async function getLogsByPlantId(plantId: string): Promise<CareLog[]> {
     `,
     plantId
   );
+}
+
+export async function getLatestActionDateByType(
+  plantId: string,
+  actionType: CareActionType,
+  database?: SQLiteDatabase
+): Promise<string | null> {
+  const activeDatabase = await resolveDatabase(database);
+
+  const log = await activeDatabase.getFirstAsync<{ actionDate: string }>(
+    `
+      SELECT actionDate
+      FROM care_logs
+      WHERE plantId = ? AND actionType = ?
+      ORDER BY actionDate DESC, createdAt DESC
+      LIMIT 1
+    `,
+    plantId,
+    actionType
+  );
+
+  return log?.actionDate ?? null;
 }
 
 export async function addCareLog(

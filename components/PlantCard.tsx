@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { RiskBadge } from '@/components/RiskBadge';
 import { formatDateLabel } from '@/lib/date';
 import type { PlantListItem } from '@/types/plant';
 
@@ -20,20 +21,29 @@ export function PlantCard({ plant, onPress }: PlantCardProps) {
           <Text style={styles.title}>{plant.name}</Text>
           <Text style={styles.subtitle}>{plant.species}</Text>
         </View>
-
-        {plant.isOverdue ? (
-          <View style={[styles.badge, styles.overdueBadge]}>
-            <Text style={[styles.badgeText, styles.overdueBadgeText]}>Просрочено</Text>
-          </View>
-        ) : (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>По плану</Text>
-          </View>
-        )}
+        <RiskBadge compact level={plant.riskLevel} />
       </View>
 
-      <Text style={styles.metaLabel}>Следующий полив</Text>
-      <Text style={styles.metaValue}>{formatDateLabel(plant.nextWateringDate)}</Text>
+      <View style={styles.metaRow}>
+        <View style={styles.metaItem}>
+          <Text style={styles.metaLabel}>Следующий полив</Text>
+          <Text style={styles.metaValue}>{formatDateLabel(plant.nextWateringDate)}</Text>
+        </View>
+        <View style={styles.metaItem}>
+          <Text style={styles.metaLabel}>Просроченные задачи</Text>
+          <Text style={[styles.metaValue, plant.overdueTaskCount > 0 && styles.overdueValue]}>
+            {plant.overdueTaskCount}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.statusRow}>
+        <View style={[styles.badge, plant.isOverdue && styles.overdueBadge]}>
+          <Text style={[styles.badgeText, plant.isOverdue && styles.overdueBadgeText]}>
+            {plant.isOverdue ? 'Требует внимания' : 'Уход по плану'}
+          </Text>
+        </View>
+      </View>
     </Pressable>
   );
 }
@@ -70,6 +80,14 @@ const styles = StyleSheet.create({
     color: '#667085',
     fontSize: 14,
   },
+  metaRow: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+  },
+  metaItem: {
+    flex: 1,
+  },
   metaLabel: {
     color: '#667085',
     fontSize: 13,
@@ -80,7 +98,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  overdueValue: {
+    color: '#c2410c',
+  },
+  statusRow: {
+    marginTop: 14,
+  },
   badge: {
+    alignSelf: 'flex-start',
     backgroundColor: '#edf7ef',
     borderRadius: 999,
     paddingHorizontal: 10,

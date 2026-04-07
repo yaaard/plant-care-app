@@ -8,6 +8,7 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { initializeDatabase } from '@/lib/db-init';
 import { configureNotificationHandler, refreshScheduledNotificationsAsync } from '@/lib/notifications';
+import { refreshAllPlantCareState } from '@/lib/plants-repo';
 import { getErrorMessage } from '@/lib/validators';
 
 export const unstable_settings = {
@@ -27,6 +28,7 @@ export default function RootLayout() {
     void (async () => {
       try {
         await initializeDatabase();
+        await refreshAllPlantCareState();
         await refreshScheduledNotificationsAsync();
 
         if (isMounted) {
@@ -34,7 +36,9 @@ export default function RootLayout() {
         }
       } catch (error) {
         if (isMounted) {
-          setErrorMessage(getErrorMessage(error, 'Не удалось подготовить приложение к запуску.'));
+          setErrorMessage(
+            getErrorMessage(error, 'Не удалось подготовить приложение к запуску.')
+          );
         }
       }
     })();
@@ -57,7 +61,9 @@ export default function RootLayout() {
     return (
       <View style={styles.centered}>
         <ActivityIndicator color="#2f6f3e" size="large" />
-        <Text style={styles.loadingText}>Подготавливаем локальную базу и напоминания...</Text>
+        <Text style={styles.loadingText}>
+          Подготавливаем локальную базу, задачи и напоминания...
+        </Text>
       </View>
     );
   }
@@ -72,6 +78,10 @@ export default function RootLayout() {
         <Stack.Screen
           name="plant/recommendations/[id]"
           options={{ title: 'Рекомендации по уходу' }}
+        />
+        <Stack.Screen
+          name="plant/health/[id]"
+          options={{ title: 'Состояние растения' }}
         />
         <Stack.Screen name="task/[id]" options={{ title: 'Задача' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Информация' }} />

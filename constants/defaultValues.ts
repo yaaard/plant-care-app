@@ -1,10 +1,11 @@
 import type { PlantFormValues } from '@/types/plant';
+import type { RiskLevel } from '@/types/risk';
 import type { AppSettings } from '@/types/settings';
 
 export const DATABASE_NAME = 'plant-care.db';
 export const NOTIFICATION_CHANNEL_ID = 'plant-care-reminders';
 export const DEFAULT_WATERING_INTERVAL_DAYS = 7;
-export const DEFAULT_WATERING_COMMENT = 'Полив отмечен в приложении';
+export const DEFAULT_RISK_LEVEL: RiskLevel = 'low';
 
 export const DEFAULT_PLANT_FORM_VALUES: PlantFormValues = {
   name: '',

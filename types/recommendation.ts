@@ -1,4 +1,4 @@
-import type { Plant } from '@/types/plant';
+import type { CareTaskType } from '@/types/task';
 
 export interface PlantGuideEntry {
   id: string;
@@ -9,6 +9,9 @@ export interface PlantGuideEntry {
   temperatureRange: string;
   careTips: string;
   riskNotes: string;
+  inspectionIntervalDays: number;
+  sprayingIntervalDays: number | null;
+  fertilizingIntervalDays: number;
 }
 
 export interface RecommendationResult {
@@ -19,10 +22,7 @@ export interface RecommendationResult {
   riskWarnings: string[];
   diagnosisHints: string[];
   personalizedTips: string[];
+  priorityChecks: string[];
+  suggestedCareTypes: CareTaskType[];
   highlights: string[];
-}
-
-export interface RecommendationContext {
-  plant: Plant;
-  guideEntry: PlantGuideEntry | null;
 }

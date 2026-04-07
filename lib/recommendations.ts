@@ -1,42 +1,35 @@
+import { CARE_TYPES } from '@/constants/careTypes';
 import { getPlantGuideEntryByName } from '@/constants/plantGuide';
 import { getDaysSince } from '@/lib/date';
+import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
+import type { CareLog } from '@/types/log';
 import { parseConditionTags, type Plant } from '@/types/plant';
 import type { PlantGuideEntry, RecommendationResult } from '@/types/recommendation';
+import type { RiskAssessmentResult } from '@/types/risk';
+import type { CareTask, CareTaskType } from '@/types/task';
+
+type RecommendationInput = {
+  plant: Plant;
+  tasks?: CareTask[];
+  logs?: CareLog[];
+  guideEntry?: PlantGuideEntry | null;
+  riskAssessment?: RiskAssessmentResult;
+};
 
 function normalizeText(value: string) {
   return value.trim().toLowerCase();
 }
 
-function buildHighlights(params: {
-  overdue: boolean;
-  possibleOverwatering: boolean;
-  possibleDryAir: boolean;
-  possibleUnderwatering: boolean;
-  lightMismatch: boolean;
-}): string[] {
-  const highlights: string[] = [];
-
-  if (params.possibleOverwatering) {
-    highlights.push('Возможен перелив');
+function pushUnique(list: string[], value: string) {
+  if (!list.includes(value)) {
+    list.push(value);
   }
+}
 
-  if (params.possibleUnderwatering) {
-    highlights.push('Растению может не хватать воды');
+function pushTaskType(list: CareTaskType[], value: CareTaskType) {
+  if (!list.includes(value)) {
+    list.push(value);
   }
-
-  if (params.possibleDryAir && highlights.length < 2) {
-    highlights.push('Стоит проверить влажность воздуха');
-  }
-
-  if (params.lightMismatch && highlights.length < 2) {
-    highlights.push('Стоит проверить уровень освещения');
-  }
-
-  if (highlights.length === 0) {
-    highlights.push(params.overdue ? 'Полив близок к сроку' : 'Полив близок к норме');
-  }
-
-  return highlights.slice(0, 2);
 }
 
 function getLightAdvice(lightCondition: string, guideEntry: PlantGuideEntry | null) {
@@ -51,7 +44,7 @@ function getLightAdvice(lightCondition: string, guideEntry: PlantGuideEntry | nu
     return `Сверьте текущее место с ориентиром из справочника: ${guideEntry.lightLevel}.`;
   }
 
-  if (normalizedCurrent.includes(normalizedTarget)) {
+  if (normalizedCurrent.includes(normalizedTarget) || normalizedTarget.includes(normalizedCurrent)) {
     return 'Освещение выглядит близким к рекомендуемому для выбранного вида.';
   }
 
@@ -82,7 +75,7 @@ function getHumidityAdvice(humidityCondition: string, guideEntry: PlantGuideEntr
     return `Для этого вида обычно подходит влажность: ${guideEntry.humidityLevel}.`;
   }
 
-  if (normalizedCurrent.includes(normalizedTarget)) {
+  if (normalizedCurrent.includes(normalizedTarget) || normalizedTarget.includes(normalizedCurrent)) {
     return 'Влажность воздуха выглядит близкой к рекомендуемой.';
   }
 
@@ -97,198 +90,132 @@ function getHumidityAdvice(humidityCondition: string, guideEntry: PlantGuideEntr
   return `Сверьте текущую влажность с ориентиром из справочника: ${guideEntry.humidityLevel}.`;
 }
 
-function getTemperatureTip(roomTemperature: string, guideEntry: PlantGuideEntry | null) {
-  if (!guideEntry || !roomTemperature.trim()) {
-    return null;
-  }
-
-  const guideNumbers = guideEntry.temperatureRange.match(/\d+/g)?.map(Number) ?? [];
-  const currentNumber = Number(roomTemperature.match(/\d+/)?.[0]);
-
-  if (guideNumbers.length < 2 || Number.isNaN(currentNumber)) {
-    return null;
-  }
-
-  const [minTemp, maxTemp] = guideNumbers;
-
-  if (currentNumber < minTemp) {
-    return `Температура может быть ниже комфортной для этого вида. Ориентир: ${guideEntry.temperatureRange}.`;
-  }
-
-  if (currentNumber > maxTemp) {
-    return `Температура может быть выше рекомендуемой. Для этого вида обычно подходит диапазон ${guideEntry.temperatureRange}.`;
-  }
-
-  return `Температура выглядит приемлемой для выбранного вида: ${guideEntry.temperatureRange}.`;
-}
-
-function createNeutralAdvice(guideEntry: PlantGuideEntry | null): RecommendationResult {
-  const personalizedTips = [
-    guideEntry?.careTips ??
-      'Продолжайте наблюдать за почвой, освещением и общим состоянием растения.',
-  ];
-
-  if (guideEntry?.riskNotes) {
-    personalizedTips.push(`Стоит помнить: ${guideEntry.riskNotes}`);
-  }
-
-  return {
-    summary:
-      'Для точного анализа пока мало данных, поэтому приложение даёт только мягкие рекомендации по базовому уходу.',
-    wateringAdvice:
-      'Оценивайте влажность почвы перед поливом и не ориентируйтесь только на календарь.',
-    lightAdvice: guideEntry
-      ? `Для вида "${guideEntry.name}" обычно подходит режим: ${guideEntry.lightLevel}.`
-      : 'Оцените, хватает ли растению стабильного света без резких перепадов.',
-    humidityAdvice: guideEntry
-      ? `Ориентир по влажности для этого вида: ${guideEntry.humidityLevel}.`
-      : 'Если воздух дома сухой, полезно чаще следить за состоянием листьев.',
-    riskWarnings: [],
-    diagnosisHints: [],
-    personalizedTips,
-    highlights: ['Стоит собрать больше данных о состоянии растения'],
-  };
-}
-
-export function buildPlantRecommendations(
-  plant: Plant,
-  guideEntry: PlantGuideEntry | null = getPlantGuideEntryByName(plant.species)
-): RecommendationResult {
-  if (!plant.species && !guideEntry) {
-    return createNeutralAdvice(guideEntry);
-  }
-
+export function buildPlantRecommendations({
+  plant,
+  tasks = [],
+  logs = [],
+  guideEntry = getPlantGuideEntryByName(plant.species),
+  riskAssessment = buildPlantRiskAssessment(plant, tasks, logs, guideEntry),
+}: RecommendationInput): RecommendationResult {
   const tags = parseConditionTags(plant.conditionTags);
   const daysSinceWatering = getDaysSince(plant.lastWateringDate);
-  const recommendedInterval =
-    guideEntry?.recommendedWateringIntervalDays ?? plant.wateringIntervalDays;
-  const intervalDifference = plant.wateringIntervalDays - recommendedInterval;
-  const overdue = daysSinceWatering !== null && daysSinceWatering >= plant.wateringIntervalDays;
-  const lightMismatch =
-    Boolean(guideEntry?.lightLevel) &&
-    Boolean(plant.lightCondition.trim()) &&
-    !normalizeText(guideEntry!.lightLevel).includes(normalizeText(plant.lightCondition)) &&
-    !normalizeText(plant.lightCondition).includes(normalizeText(guideEntry!.lightLevel));
-
-  const possibleOverwatering =
-    intervalDifference <= -3 ||
-    (tags.includes('yellow_leaves') && intervalDifference <= -2) ||
-    (guideEntry?.name === 'Кактус' && plant.wateringIntervalDays < recommendedInterval);
-
-  const possibleDryAir =
-    tags.includes('dry_tips') ||
-    (guideEntry?.humidityLevel === 'высокая' && plant.humidityCondition === 'низкая');
-
-  const possibleUnderwatering =
-    tags.includes('wilting') &&
-    (daysSinceWatering === null || daysSinceWatering >= plant.wateringIntervalDays);
-
-  const riskWarnings: string[] = [];
+  const pendingTasks = tasks.filter((task) => task.isCompleted === 0);
+  const overdueTasks = pendingTasks.filter((task) => task.scheduledDate < new Date().toISOString().slice(0, 10));
+  const suggestedCareTypes: CareTaskType[] = [];
+  const riskWarnings = [...riskAssessment.reasons];
   const diagnosisHints: string[] = [];
   const personalizedTips: string[] = [];
+  const priorityChecks = [...riskAssessment.recommendations];
+  const highlights: string[] = [];
 
   let wateringAdvice =
     daysSinceWatering === null
-      ? 'Последний полив не указан. Начните с наблюдения за почвой и реакцией растения.'
-      : overdue
-        ? 'Срок полива уже близок или наступил. Проверьте влажность почвы и состояние листьев.'
-        : 'Текущий режим полива выглядит близким к выбранному интервалу.';
+      ? 'Последний полив не указан. Начните с проверки влажности почвы перед следующими действиями.'
+      : daysSinceWatering >= plant.wateringIntervalDays
+        ? 'Срок полива уже близок или наступил. Проверьте влажность грунта и только потом решайте, нужен ли полив прямо сейчас.'
+        : 'Текущий режим полива выглядит относительно близким к выбранному интервалу.';
 
   if (guideEntry?.name === 'Кактус') {
     wateringAdvice =
-      'Для кактуса обычно лучше редкий полив после полного просыхания субстрата. Важно избегать переувлажнения.';
-  }
-
-  if (guideEntry?.name === 'Спатифиллум') {
-    personalizedTips.push(
-      'Спатифиллум любит более стабильную влажность почвы и воздуха, чем большинство неприхотливых видов.'
-    );
-  }
-
-  if (possibleOverwatering) {
-    riskWarnings.push(
-      'Выбранный интервал полива выглядит более частым, чем обычно рекомендуют для этого вида. Стоит проверить, не переувлажняется ли растение.'
-    );
-  }
-
-  if (intervalDifference >= 5) {
-    riskWarnings.push(
-      'Выбранный интервал полива заметно длиннее справочного. Если листья теряют тургор, возможно, влаги не хватает.'
-    );
+      'Для кактуса обычно лучше редкий полив после полного просыхания субстрата. Если есть сомнения, безопаснее сначала проверить почву.';
   }
 
   if (tags.includes('yellow_leaves')) {
-    diagnosisHints.push(
-      possibleOverwatering
-        ? 'Желтеющие листья могут быть связаны с переливом. Рекомендуется проверить влажность почвы и дренаж.'
-        : 'Желтизна листьев может быть связана и с освещением, и с режимом полива. Полезно оценить оба фактора вместе.'
+    pushUnique(
+      diagnosisHints,
+      'Желтеющие листья могут быть связаны как с переливом, так и с недостатком света. Стоит проверить оба фактора.'
     );
   }
 
   if (tags.includes('dry_tips')) {
-    diagnosisHints.push(
-      'Сухие кончики часто появляются при сухом воздухе или нерегулярном поливе. Стоит оценить влажность воздуха.'
+    pushUnique(
+      diagnosisHints,
+      'Сухие кончики часто появляются при сухом воздухе. Если это совпадает с низкой влажностью, полезно добавить опрыскивание или другой способ увлажнения.'
     );
+    pushTaskType(suggestedCareTypes, CARE_TYPES.SPRAYING);
   }
 
   if (tags.includes('brown_spots')) {
-    diagnosisHints.push(
-      'Коричневые пятна могут быть связаны с ожогами, переувлажнением или резкими перепадами температуры.'
+    pushUnique(
+      diagnosisHints,
+      'Коричневые пятна могут быть следствием ожогов, стресса от полива или перепадов условий. Лучше провести внимательный осмотр листьев.'
     );
+    pushTaskType(suggestedCareTypes, CARE_TYPES.INSPECTION);
   }
 
   if (tags.includes('wilting')) {
-    diagnosisHints.push(
-      possibleUnderwatering
-        ? 'Поникшее состояние может указывать на недостаток воды. Стоит проверить, насколько сухой грунт.'
-        : 'Поникание возможно и при переувлажнении. Если почва сырая, лучше не спешить с новым поливом.'
+    pushUnique(
+      diagnosisHints,
+      'Поникшее состояние часто требует проверки влажности почвы и состояния корней. Это не всегда связано только с нехваткой воды.'
     );
   }
 
   if (tags.includes('slow_growth')) {
-    diagnosisHints.push(
-      'Медленный рост часто связан с нехваткой света, тесным горшком или истощением почвы.'
+    pushUnique(
+      diagnosisHints,
+      'Медленный рост может быть связан с нехваткой света, питания или естественной сезонностью. Стоит проверить условия комплексно.'
     );
+    pushTaskType(suggestedCareTypes, CARE_TYPES.FERTILIZING);
   }
 
-  if (tags.includes('healthy') && tags.length === 1) {
-    personalizedTips.push(
-      'Растение выглядит стабильным. Сейчас полезнее всего сохранять текущий режим и не делать резких изменений.'
-    );
+  if (!plant.lastInspectionDate || overdueTasks.some((task) => task.type === CARE_TYPES.INSPECTION)) {
+    pushTaskType(suggestedCareTypes, CARE_TYPES.INSPECTION);
+    pushUnique(priorityChecks, 'Проведите осмотр листьев, стеблей и поверхности почвы.');
+  }
+
+  if (
+    normalizeText(plant.humidityCondition) === 'низкая' ||
+    tags.includes('dry_tips') ||
+    guideEntry?.humidityLevel === 'высокая'
+  ) {
+    pushUnique(personalizedTips, 'Если воздух в комнате сухой, стоит обратить внимание на опрыскивание и общее увлажнение пространства вокруг растения.');
+    pushTaskType(suggestedCareTypes, CARE_TYPES.SPRAYING);
+  }
+
+  if (riskAssessment.riskLevel === 'high') {
+    pushUnique(priorityChecks, 'Сначала проверьте почву, листья и условия освещения, а затем уже меняйте режим ухода.');
+    pushUnique(personalizedTips, 'При высоком риске лучше действовать поэтапно и не менять сразу несколько условий одновременно.');
+  }
+
+  if (riskAssessment.riskLevel !== 'low') {
+    pushUnique(highlights, `Уровень риска: ${riskAssessment.summary}`);
+  }
+
+  if (suggestedCareTypes.length === 0 && pendingTasks.length === 0) {
+    pushUnique(personalizedTips, 'Сейчас можно ограничиться профилактическим наблюдением и поддержанием стабильного режима ухода.');
+  }
+
+  if (guideEntry?.careTips) {
+    pushUnique(personalizedTips, guideEntry.careTips);
+  }
+
+  if (guideEntry?.riskNotes) {
+    pushUnique(personalizedTips, `Типичный риск для этого вида: ${guideEntry.riskNotes}`);
+  }
+
+  if (plant.customCareComment.trim()) {
+    pushUnique(personalizedTips, `Учитывайте и собственные наблюдения: ${plant.customCareComment.trim()}`);
   }
 
   const lightAdvice = getLightAdvice(plant.lightCondition, guideEntry);
   const humidityAdvice = getHumidityAdvice(plant.humidityCondition, guideEntry);
-  const temperatureTip = getTemperatureTip(plant.roomTemperature, guideEntry);
 
-  if (temperatureTip) {
-    personalizedTips.push(temperatureTip);
+  if (riskWarnings.length === 0) {
+    pushUnique(highlights, 'Серьёзных факторов риска сейчас не видно.');
+  } else {
+    riskWarnings.slice(0, 2).forEach((reason) => pushUnique(highlights, reason));
   }
 
-  if (guideEntry?.careTips) {
-    personalizedTips.push(guideEntry.careTips);
-  }
-
-  if (guideEntry?.riskNotes) {
-    personalizedTips.push(`Типичный риск для этого вида: ${guideEntry.riskNotes}`);
-  }
-
-  if (plant.customCareComment.trim()) {
-    personalizedTips.push(`Учитывайте и свои наблюдения: ${plant.customCareComment.trim()}`);
-  }
-
-  if (!guideEntry) {
-    personalizedTips.push(
-      'Если вид указан необычно, попробуйте выбрать ближайший вариант из справочника для более точных советов.'
-    );
+  if (highlights.length === 0) {
+    pushUnique(highlights, 'Полив и базовые условия ухода пока выглядят относительно стабильными.');
   }
 
   const summary =
-    tags.includes('healthy') && tags.length === 1 && riskWarnings.length === 0
-      ? 'Сейчас растение выглядит устойчиво. Главная задача — сохранить стабильные условия и не сбивать режим ухода.'
-      : riskWarnings.length > 0 || diagnosisHints.length > 0
-        ? 'Есть признаки, на которые стоит обратить внимание. Ниже приведены возможные причины и мягкие рекомендации по проверке условий.'
-        : 'Условия выглядят относительно стабильными, но полезно периодически сверять уход с особенностями выбранного вида.';
+    riskAssessment.riskLevel === 'high'
+      ? 'Приложение видит несколько факторов риска. Стоит начать с самых заметных симптомов и просроченных задач.'
+      : riskAssessment.riskLevel === 'medium'
+        ? 'Есть отдельные признаки, которые требуют внимания, но ситуацию можно стабилизировать последовательным уходом.'
+        : 'Состояние выглядит спокойным. Рекомендации сейчас в основном профилактические.';
 
   return {
     summary,
@@ -298,19 +225,12 @@ export function buildPlantRecommendations(
     riskWarnings,
     diagnosisHints,
     personalizedTips,
-    highlights: buildHighlights({
-      overdue,
-      possibleOverwatering,
-      possibleDryAir,
-      possibleUnderwatering,
-      lightMismatch,
-    }),
+    priorityChecks: priorityChecks.slice(0, 4),
+    suggestedCareTypes,
+    highlights: highlights.slice(0, 3),
   };
 }
 
-export function getRecommendationHighlights(
-  plant: Plant,
-  guideEntry: PlantGuideEntry | null = getPlantGuideEntryByName(plant.species)
-) {
-  return buildPlantRecommendations(plant, guideEntry).highlights;
+export function getRecommendationHighlights(input: RecommendationInput) {
+  return buildPlantRecommendations(input).highlights.slice(0, 2);
 }

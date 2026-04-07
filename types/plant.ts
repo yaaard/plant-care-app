@@ -1,3 +1,5 @@
+import type { RiskLevel } from '@/types/risk';
+
 export type PlantConditionTag =
   | 'yellow_leaves'
   | 'dry_tips'
@@ -28,6 +30,8 @@ export interface Plant {
   roomTemperature: string;
   conditionTags: string;
   customCareComment: string;
+  riskLevel: RiskLevel;
+  lastInspectionDate: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -46,13 +50,31 @@ export interface PlantFormValues {
   customCareComment: string;
 }
 
+export interface PlantHealthFormValues {
+  conditionTags: PlantConditionTag[];
+  customCareComment: string;
+}
+
 export interface PlantListItem extends Plant {
   nextWateringDate: string;
   isOverdue: boolean;
+  overdueTaskCount: number;
 }
 
 export function isPlantConditionTag(value: string): value is PlantConditionTag {
   return PLANT_CONDITION_TAG_VALUES.includes(value as PlantConditionTag);
+}
+
+export function normalizeConditionTags(tags: PlantConditionTag[]): PlantConditionTag[] {
+  const uniqueTags = Array.from(
+    new Set(tags.filter((tag): tag is PlantConditionTag => isPlantConditionTag(tag)))
+  );
+
+  if (uniqueTags.includes('healthy') && uniqueTags.length > 1) {
+    return uniqueTags.filter((tag) => tag !== 'healthy');
+  }
+
+  return uniqueTags;
 }
 
 export function parseConditionTags(rawValue: string | null | undefined): PlantConditionTag[] {
@@ -64,20 +86,22 @@ export function parseConditionTags(rawValue: string | null | undefined): PlantCo
     const parsedValue = JSON.parse(rawValue);
 
     if (Array.isArray(parsedValue)) {
-      return parsedValue.filter((value): value is PlantConditionTag => isPlantConditionTag(value));
+      return normalizeConditionTags(
+        parsedValue.filter((value): value is PlantConditionTag => isPlantConditionTag(value))
+      );
     }
   } catch {
-    return rawValue
-      .split(',')
-      .map((value) => value.trim())
-      .filter((value): value is PlantConditionTag => isPlantConditionTag(value));
+    return normalizeConditionTags(
+      rawValue
+        .split(',')
+        .map((value) => value.trim())
+        .filter((value): value is PlantConditionTag => isPlantConditionTag(value))
+    );
   }
 
   return [];
 }
 
 export function serializeConditionTags(tags: PlantConditionTag[]): string {
-  return JSON.stringify(
-    Array.from(new Set(tags.filter((tag): tag is PlantConditionTag => isPlantConditionTag(tag))))
-  );
+  return JSON.stringify(normalizeConditionTags(tags));
 }

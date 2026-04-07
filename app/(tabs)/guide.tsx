@@ -13,8 +13,8 @@ export default function GuideScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.content}>
           <EmptyState
-            title="Справочник пуст"
             description="Локальная база знаний пока не заполнена."
+            title="Справочник пуст"
           />
         </View>
       </SafeAreaView>
@@ -26,8 +26,8 @@ export default function GuideScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <SectionTitle title="Справочник растений" />
         <Text style={styles.subtitle}>
-          Краткие ориентиры по популярным комнатным видам. Эти данные используются и для
-          модуля рекомендаций.
+          Эти ориентиры используются и в модуле рекомендаций: по ним приложение сравнивает
+          текущие условия, интервалы ухода и признаки состояния.
         </Text>
 
         {PLANT_GUIDE.map((item) => {
@@ -64,6 +64,27 @@ export default function GuideScreen() {
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Температура</Text>
                     <Text style={styles.detailValue}>{item.temperatureRange}</Text>
+                  </View>
+
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Осмотр</Text>
+                    <Text style={styles.detailValue}>примерно раз в {item.inspectionIntervalDays} дн.</Text>
+                  </View>
+
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Опрыскивание</Text>
+                    <Text style={styles.detailValue}>
+                      {item.sprayingIntervalDays
+                        ? `примерно раз в ${item.sprayingIntervalDays} дн.`
+                        : 'обычно не требуется'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Подкормка</Text>
+                    <Text style={styles.detailValue}>
+                      примерно раз в {item.fertilizingIntervalDays} дн.
+                    </Text>
                   </View>
 
                   <Text style={styles.sectionLabel}>Советы по уходу</Text>

@@ -16,13 +16,17 @@ import { Stack, type Href, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { CareTaskCard } from '@/components/CareTaskCard';
 import { EmptyState } from '@/components/EmptyState';
+import { QuickActionButtons } from '@/components/QuickActionButtons';
+import { RiskBadge } from '@/components/RiskBadge';
 import { SectionTitle } from '@/components/SectionTitle';
-import { CARE_TYPE_LABELS } from '@/constants/careTypes';
-import { getConditionTagLabel, getPlantGuideEntryByName } from '@/constants/plantGuide';
+import { getCareTypeLabel } from '@/constants/careTypes';
+import { getHealthTagLabel } from '@/constants/healthTags';
+import { getPlantGuideEntryByName } from '@/constants/plantGuide';
 import { formatDateLabel, getNextWateringDate } from '@/lib/date';
 import { getLogsByPlantId } from '@/lib/logs-repo';
-import { deletePlant, getPlantById, markPlantAsWatered } from '@/lib/plants-repo';
-import { getRecommendationHighlights } from '@/lib/recommendations';
+import { completePlantTask, deletePlant, getPlantById, markPlantAsWatered } from '@/lib/plants-repo';
+import { buildPlantRecommendations } from '@/lib/recommendations';
+import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
 import { getTasksByPlantId } from '@/lib/tasks-repo';
 import { getErrorMessage } from '@/lib/validators';
 import type { CareLog } from '@/types/log';
@@ -30,11 +34,7 @@ import { parseConditionTags, type Plant } from '@/types/plant';
 import type { CareTask } from '@/types/task';
 
 function normalizeParam(value: string | string[] | undefined) {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-
-  return value;
+  return Array.isArray(value) ? value[0] : value;
 }
 
 export default function PlantDetailsScreen() {
@@ -47,6 +47,7 @@ export default function PlantDetailsScreen() {
   const [logs, setLogs] = useState<CareLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const loadDetails = useCallback(async () => {
@@ -100,6 +101,20 @@ export default function PlantDetailsScreen() {
     }
   };
 
+  const handleCompleteTask = async (task: CareTask) => {
+    setBusyTaskId(task.id);
+
+    try {
+      await completePlantTask(task.id);
+      await loadDetails();
+      setErrorMessage(null);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, 'Не удалось отметить задачу выполненной.'));
+    } finally {
+      setBusyTaskId(null);
+    }
+  };
+
   const confirmDelete = () => {
     Alert.alert(
       'Удалить растение?',
@@ -135,21 +150,38 @@ export default function PlantDetailsScreen() {
     );
   };
 
-  const nextWateringDate =
-    tasks.find((task) => task.isCompleted === 0)?.scheduledDate ??
-    (plant ? getNextWateringDate(plant.lastWateringDate, plant.wateringIntervalDays) : null);
   const guideEntry = useMemo(
     () => (plant ? getPlantGuideEntryByName(plant.species) : null),
     [plant]
   );
-  const recommendationHighlights = useMemo(
-    () => (plant ? getRecommendationHighlights(plant, guideEntry) : []),
-    [guideEntry, plant]
+  const riskAssessment = useMemo(
+    () => (plant ? buildPlantRiskAssessment(plant, tasks, logs, guideEntry) : null),
+    [guideEntry, logs, plant, tasks]
+  );
+  const recommendation = useMemo(
+    () =>
+      plant && riskAssessment
+        ? buildPlantRecommendations({
+            plant,
+            tasks,
+            logs,
+            guideEntry,
+            riskAssessment,
+          })
+        : null,
+    [guideEntry, logs, plant, riskAssessment, tasks]
+  );
+  const activeTasks = useMemo(
+    () => tasks.filter((task) => task.isCompleted === 0),
+    [tasks]
   );
   const conditionTags = useMemo(
     () => (plant ? parseConditionTags(plant.conditionTags) : []),
     [plant]
   );
+  const nextWateringDate =
+    activeTasks.find((task) => task.type === 'watering')?.scheduledDate ??
+    (plant ? getNextWateringDate(plant.lastWateringDate, plant.wateringIntervalDays) : null);
 
   if (loading && !plant) {
     return (
@@ -162,7 +194,7 @@ export default function PlantDetailsScreen() {
     );
   }
 
-  if (!plant) {
+  if (!plant || !riskAssessment || !recommendation) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <Stack.Screen options={{ title: 'Карточка растения' }} />
@@ -207,87 +239,151 @@ export default function PlantDetailsScreen() {
         )}
 
         <View style={styles.card}>
-          <Text style={styles.plantName}>{plant.name}</Text>
-          <Text style={styles.plantSpecies}>{plant.species}</Text>
-          {guideEntry ? (
-            <Text style={styles.referenceText}>
-              Справочный режим: полив примерно раз в {guideEntry.recommendedWateringIntervalDays} дн.
-            </Text>
-          ) : null}
+          <View style={styles.headerRow}>
+            <View style={styles.titleBlock}>
+              <Text style={styles.plantName}>{plant.name}</Text>
+              <Text style={styles.plantSpecies}>{plant.species}</Text>
+            </View>
+            <RiskBadge level={riskAssessment.riskLevel} />
+          </View>
+
+          <Text style={styles.summaryText}>{riskAssessment.summary}</Text>
+
+          <View style={styles.reasonBox}>
+            <Text style={styles.reasonTitle}>Ключевые причины риска</Text>
+            {riskAssessment.reasons.length === 0 ? (
+              <Text style={styles.reasonText}>Серьёзных факторов риска по текущим данным не найдено.</Text>
+            ) : (
+              riskAssessment.reasons.slice(0, 3).map((reason) => (
+                <Text key={reason} style={styles.reasonText}>
+                  • {reason}
+                </Text>
+              ))
+            )}
+          </View>
 
           <View style={styles.infoGrid}>
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Последний полив</Text>
               <Text style={styles.infoValue}>{formatDateLabel(plant.lastWateringDate)}</Text>
             </View>
-
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>Интервал</Text>
-              <Text style={styles.infoValue}>{plant.wateringIntervalDays} дн.</Text>
-            </View>
-
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Следующий полив</Text>
               <Text style={styles.infoValue}>{formatDateLabel(nextWateringDate)}</Text>
             </View>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Интервал полива</Text>
+              <Text style={styles.infoValue}>{plant.wateringIntervalDays} дн.</Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Последний осмотр</Text>
+              <Text style={styles.infoValue}>{formatDateLabel(plant.lastInspectionDate)}</Text>
+            </View>
           </View>
+        </View>
 
-          <Text style={styles.notesLabel}>Условия в комнате</Text>
+        <View style={styles.card}>
+          <SectionTitle title="Состояние и условия" />
+
           <View style={styles.infoGrid}>
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Освещение</Text>
-              <Text style={styles.infoValue}>{formatDateLabel(plant.lightCondition || null)}</Text>
+              <Text style={styles.infoValue}>{plant.lightCondition || 'Не указано'}</Text>
             </View>
-
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Влажность</Text>
-              <Text style={styles.infoValue}>
-                {formatDateLabel(plant.humidityCondition || null)}
-              </Text>
+              <Text style={styles.infoValue}>{plant.humidityCondition || 'Не указано'}</Text>
             </View>
-
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Температура</Text>
+              <Text style={styles.infoValue}>{plant.roomTemperature || 'Не указано'}</Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Справочный полив</Text>
               <Text style={styles.infoValue}>
-                {formatDateLabel(plant.roomTemperature || null)}
+                {guideEntry
+                  ? `примерно раз в ${guideEntry.recommendedWateringIntervalDays} дн.`
+                  : 'Нет данных'}
               </Text>
             </View>
           </View>
 
-          <Text style={styles.notesLabel}>Признаки состояния</Text>
+          <Text style={styles.sectionLabel}>Теги состояния</Text>
           {conditionTags.length > 0 ? (
             <View style={styles.tagWrap}>
               {conditionTags.map((tag) => (
                 <View key={tag} style={styles.tag}>
-                  <Text style={styles.tagText}>{getConditionTagLabel(tag)}</Text>
+                  <Text style={styles.tagText}>{getHealthTagLabel(tag)}</Text>
                 </View>
               ))}
             </View>
           ) : (
-            <Text style={styles.notesValue}>Пока не отмечены.</Text>
+            <Text style={styles.bodyText}>Симптомы пока не отмечены.</Text>
           )}
 
-          <Text style={styles.notesLabel}>Комментарий для анализа</Text>
-          <Text style={styles.notesValue}>
+          <Text style={styles.sectionLabel}>Комментарий пользователя</Text>
+          <Text style={styles.bodyText}>
             {plant.customCareComment || 'Пока нет дополнительного комментария.'}
           </Text>
 
-          <Text style={styles.notesLabel}>Заметки</Text>
-          <Text style={styles.notesValue}>
-            {plant.notes || 'Пока нет дополнительных заметок.'}
-          </Text>
+          <Text style={styles.sectionLabel}>Общие заметки</Text>
+          <Text style={styles.bodyText}>{plant.notes || 'Пока нет заметок.'}</Text>
         </View>
 
-        <View style={[styles.card, styles.recommendationCard]}>
-          <Text style={styles.notesLabel}>Краткая рекомендация</Text>
-          {recommendationHighlights.map((item) => (
-            <Text key={item} style={styles.highlightText}>
-              - {item}
+        <View style={styles.card}>
+          <SectionTitle title="Краткая рекомендация" />
+          {recommendation.highlights.map((item) => (
+            <Text key={item} style={styles.bodyText}>
+              • {item}
             </Text>
           ))}
+        </View>
+
+        <View style={styles.card}>
+          <SectionTitle title="Что проверить сейчас" />
+          {recommendation.priorityChecks.length > 0 ? (
+            recommendation.priorityChecks.map((item) => (
+              <Text key={item} style={styles.bodyText}>
+                • {item}
+              </Text>
+            ))
+          ) : (
+            <Text style={styles.bodyText}>Поддерживайте текущий режим и периодически проводите осмотр.</Text>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <SectionTitle title="Быстрые действия" />
 
           <Pressable
             disabled={busy}
+            onPress={() => {
+              void handleMarkWatered();
+            }}
+            style={({ pressed }) => [styles.primaryButton, (pressed || busy) && styles.pressed]}
+          >
+            <Text style={styles.primaryButtonText}>
+              {busy ? 'Сохраняем...' : 'Отметить как полито'}
+            </Text>
+          </Pressable>
+
+          <View style={styles.buttonSpacer} />
+
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/plant/health/[id]',
+                params: { id: plant.id },
+              } as unknown as Href)
+            }
+            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.secondaryButtonText}>Состояние растения</Text>
+          </Pressable>
+
+          <View style={styles.buttonSpacer} />
+
+          <Pressable
             onPress={() =>
               router.push({
                 pathname: '/plant/recommendations/[id]',
@@ -300,46 +396,19 @@ export default function PlantDetailsScreen() {
           </Pressable>
         </View>
 
-        <View style={styles.actionsRow}>
-          <Pressable
-            disabled={busy}
-            onPress={() => {
-              void handleMarkWatered();
+        <View style={styles.card}>
+          <SectionTitle title="Ближайшие действия" />
+          <QuickActionButtons
+            busyTaskId={busyTaskId}
+            onComplete={(task) => {
+              void handleCompleteTask(task);
             }}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              (pressed || busy) && styles.pressed,
-            ]}
-          >
-            <Text style={styles.primaryButtonText}>
-              {busy ? 'Сохраняем...' : 'Отметить как полито'}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            disabled={busy}
-            onPress={() =>
-              router.push({
-                pathname: '/plant/edit/[id]',
-                params: { id: plant.id },
-              } as unknown as Href)
-            }
-            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.secondaryButtonText}>Редактировать</Text>
-          </Pressable>
+            tasks={activeTasks.slice(0, 3)}
+          />
+          {activeTasks.length === 0 ? (
+            <Text style={styles.bodyText}>Активных задач сейчас нет.</Text>
+          ) : null}
         </View>
-
-        <Pressable
-          disabled={busy}
-          onPress={confirmDelete}
-          style={({ pressed }) => [
-            styles.dangerButton,
-            (pressed || busy) && styles.pressed,
-          ]}
-        >
-          <Text style={styles.dangerButtonText}>Удалить растение</Text>
-        </Pressable>
 
         {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
@@ -350,20 +419,30 @@ export default function PlantDetailsScreen() {
             title="Задачи отсутствуют"
           />
         ) : (
-          tasks.map((task) => <CareTaskCard key={task.id} showPlantName={false} task={task} />)
+          tasks.map((task) => (
+            <CareTaskCard
+              key={task.id}
+              completing={busyTaskId === task.id}
+              onComplete={() => {
+                void handleCompleteTask(task);
+              }}
+              showPlantName={false}
+              task={task}
+            />
+          ))
         )}
 
         <SectionTitle title="История действий" />
         {logs.length === 0 ? (
           <EmptyState
-            description="После первого полива здесь появится журнал действий по растению."
+            description="После первого выполненного действия здесь появится журнал ухода по растению."
             title="История пока пуста"
           />
         ) : (
           logs.map((log) => (
             <View key={log.id} style={styles.logCard}>
               <Text style={styles.logTitle}>
-                {CARE_TYPE_LABELS[log.actionType]} - {log.actionDate}
+                {getCareTypeLabel(log.actionType)} • {log.actionDate}
               </Text>
               <Text style={styles.logComment}>
                 {log.comment || 'Комментарий не указан.'}
@@ -371,6 +450,14 @@ export default function PlantDetailsScreen() {
             </View>
           ))
         )}
+
+        <Pressable
+          disabled={busy}
+          onPress={confirmDelete}
+          style={({ pressed }) => [styles.dangerButton, (pressed || busy) && styles.pressed]}
+        >
+          <Text style={styles.dangerButtonText}>Удалить растение</Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -423,6 +510,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     padding: 18,
   },
+  headerRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  titleBlock: {
+    flex: 1,
+    marginRight: 12,
+  },
   plantName: {
     color: '#163020',
     fontSize: 24,
@@ -432,17 +529,33 @@ const styles = StyleSheet.create({
   plantSpecies: {
     color: '#667085',
     fontSize: 15,
+  },
+  summaryText: {
+    color: '#163020',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  reasonBox: {
+    backgroundColor: '#f7faf7',
+    borderRadius: 16,
+    marginTop: 14,
+    padding: 14,
+  },
+  reasonTitle: {
+    color: '#163020',
+    fontSize: 15,
+    fontWeight: '700',
     marginBottom: 8,
   },
-  referenceText: {
-    color: '#2f6f3e',
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 18,
+  reasonText: {
+    color: '#163020',
+    fontSize: 14,
+    lineHeight: 21,
+    marginBottom: 4,
   },
   infoGrid: {
     gap: 12,
-    marginBottom: 18,
+    marginTop: 16,
   },
   infoItem: {
     backgroundColor: '#f7faf7',
@@ -459,23 +572,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  notesLabel: {
+  sectionLabel: {
     color: '#163020',
     fontSize: 15,
     fontWeight: '700',
     marginBottom: 8,
   },
-  notesValue: {
+  bodyText: {
     color: '#163020',
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 18,
+    fontSize: 14,
+    lineHeight: 21,
+    marginBottom: 6,
   },
   tagWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 18,
+    marginBottom: 14,
   },
   tag: {
     backgroundColor: '#edf7ef',
@@ -487,18 +600,6 @@ const styles = StyleSheet.create({
     color: '#2f6f3e',
     fontSize: 13,
     fontWeight: '600',
-  },
-  recommendationCard: {
-    gap: 8,
-  },
-  highlightText: {
-    color: '#163020',
-    fontSize: 14,
-    lineHeight: 21,
-  },
-  actionsRow: {
-    gap: 12,
-    marginBottom: 12,
   },
   primaryButton: {
     alignItems: 'center',
@@ -526,12 +627,15 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
+  buttonSpacer: {
+    height: 10,
+  },
   dangerButton: {
     alignItems: 'center',
     backgroundColor: '#fff1e8',
     borderRadius: 14,
     justifyContent: 'center',
-    marginBottom: 18,
+    marginTop: 8,
     minHeight: 50,
   },
   dangerButtonText: {
