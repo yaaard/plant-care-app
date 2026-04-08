@@ -5,10 +5,12 @@ import { getDatabase, nowIsoString } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
 import { emitLocalDataChanged } from '@/lib/local-events';
 import { refreshScheduledNotificationsAsync } from '@/lib/notifications';
+import { replacePlantCatalogLocally } from '@/lib/plant-catalog-repo';
 import { refreshAllPlantCareState } from '@/lib/plants-repo';
 import { deletePlantPhoto, getPlantPhotoPublicUrl, uploadPlantPhoto } from '@/lib/storage';
 import { getSupabaseClient } from '@/lib/supabase';
 import { markRecordError, markRecordSynced } from '@/lib/sync-queue';
+import type { PlantCatalogPlant, PlantCatalogSymptom } from '@/types/plant-catalog';
 import type { AppSettings } from '@/types/settings';
 import type { SyncResult, LocalSyncOverview } from '@/types/sync';
 
@@ -17,6 +19,7 @@ type RemotePlantRow = {
   user_id: string;
   name: string;
   species: string;
+  catalog_plant_id: string | null;
   photo_path: string | null;
   photo_url: string | null;
   last_watering_date: string | null;
@@ -105,10 +108,48 @@ type RemoteChatMessageRow = {
   updated_at: string;
 };
 
+type RemoteCatalogPlantRow = {
+  id: string;
+  slug: string;
+  name_ru: string;
+  name_latin: string;
+  category: string;
+  description: string;
+  watering_interval_min: number;
+  watering_interval_max: number;
+  light_level: string;
+  humidity_level: string;
+  temperature_min: number;
+  temperature_max: number;
+  care_tips: string;
+  risk_notes: string;
+  soil_type: string;
+  fertilizing_info: string;
+  spraying_needed: boolean;
+  pet_safe: boolean;
+  difficulty_level: PlantCatalogPlant['difficultyLevel'];
+  inspection_interval_days: number;
+  spraying_interval_days: number | null;
+  fertilizing_interval_days: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type RemoteCatalogSymptomRow = {
+  id: string;
+  plant_catalog_id: string;
+  symptom_code: PlantCatalogSymptom['symptomCode'];
+  symptom_name_ru: string;
+  possible_cause: string;
+  recommended_action: string;
+  created_at: string;
+};
+
 type LocalPlantRecord = {
   id: string;
   name: string;
   species: string;
+  catalogPlantId: string | null;
   photoUri: string | null;
   photoPath: string | null;
   lastWateringDate: string | null;
@@ -262,6 +303,60 @@ function serializeRawJson(value: Record<string, unknown> | string | null | undef
   return '{}';
 }
 
+function mapRemoteCatalogPlant(remotePlant: RemoteCatalogPlantRow): PlantCatalogPlant {
+  const recommendedWateringIntervalDays = Math.max(
+    1,
+    Math.round(
+      (remotePlant.watering_interval_min + remotePlant.watering_interval_max) / 2
+    )
+  );
+  const temperatureRange = `${remotePlant.temperature_min}-${remotePlant.temperature_max}°C`;
+
+  return {
+    id: remotePlant.id,
+    slug: remotePlant.slug,
+    nameRu: remotePlant.name_ru,
+    nameLatin: remotePlant.name_latin,
+    name: remotePlant.name_ru,
+    category: remotePlant.category,
+    description: remotePlant.description,
+    wateringIntervalMin: remotePlant.watering_interval_min,
+    wateringIntervalMax: remotePlant.watering_interval_max,
+    recommendedWateringIntervalDays,
+    lightLevel: remotePlant.light_level,
+    humidityLevel: remotePlant.humidity_level,
+    temperatureMin: remotePlant.temperature_min,
+    temperatureMax: remotePlant.temperature_max,
+    temperatureRange,
+    careTips: remotePlant.care_tips,
+    riskNotes: remotePlant.risk_notes,
+    soilType: remotePlant.soil_type,
+    fertilizingInfo: remotePlant.fertilizing_info,
+    sprayingNeeded: remotePlant.spraying_needed,
+    petSafe: remotePlant.pet_safe,
+    difficultyLevel: remotePlant.difficulty_level,
+    inspectionIntervalDays: remotePlant.inspection_interval_days,
+    sprayingIntervalDays: remotePlant.spraying_interval_days,
+    fertilizingIntervalDays: remotePlant.fertilizing_interval_days,
+    createdAt: remotePlant.created_at,
+    updatedAt: remotePlant.updated_at,
+  };
+}
+
+function mapRemoteCatalogSymptom(
+  remoteSymptom: RemoteCatalogSymptomRow
+): PlantCatalogSymptom {
+  return {
+    id: remoteSymptom.id,
+    plantCatalogId: remoteSymptom.plant_catalog_id,
+    symptomCode: remoteSymptom.symptom_code,
+    symptomNameRu: remoteSymptom.symptom_name_ru,
+    possibleCause: remoteSymptom.possible_cause,
+    recommendedAction: remoteSymptom.recommended_action,
+    createdAt: remoteSymptom.created_at,
+  };
+}
+
 function isMissingAiAnalysesTableError(error: { message?: string } | null | undefined) {
   const message = error?.message?.toLowerCase() ?? '';
 
@@ -277,6 +372,21 @@ function isMissingAiAnalysesTableError(error: { message?: string } | null | unde
 function isMissingChatTableError(
   error: { message?: string } | null | undefined,
   tableName: 'chat_threads' | 'chat_messages'
+) {
+  const message = error?.message?.toLowerCase() ?? '';
+
+  return (
+    message.includes(tableName) &&
+    (message.includes('does not exist') ||
+      message.includes('could not find the table') ||
+      message.includes('relation') ||
+      message.includes('schema cache'))
+  );
+}
+
+function isMissingCatalogTableError(
+  error: { message?: string } | null | undefined,
+  tableName: 'plant_catalog' | 'plant_catalog_symptoms'
 ) {
   const message = error?.message?.toLowerCase() ?? '';
 
@@ -311,6 +421,7 @@ async function getLocalPlants(userId: string) {
         id,
         name,
         species,
+        catalogPlantId,
         photoUri,
         photoPath,
         lastWateringDate,
@@ -809,6 +920,7 @@ async function pushPlants(userId: string) {
         user_id: userId,
         name: plant.name,
         species: plant.species,
+        catalog_plant_id: plant.catalogPlantId,
         photo_path: nextPhotoPath,
         photo_url: nextPhotoUrl,
         last_watering_date: plant.lastWateringDate,
@@ -1055,6 +1167,7 @@ async function pullPlants(userId: string) {
             id,
             name,
             species,
+            catalogPlantId,
             photoUri,
             photoPath,
             lastWateringDate,
@@ -1072,11 +1185,12 @@ async function pullPlants(userId: string) {
             remoteUpdatedAt,
             createdAt,
             updatedAt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         remotePlant.id,
         remotePlant.name,
         remotePlant.species,
+        remotePlant.catalog_plant_id,
         remotePlant.photo_url,
         remotePlant.photo_path,
         remotePlant.last_watering_date,
@@ -1120,6 +1234,7 @@ async function pullPlants(userId: string) {
         SET
           name = ?,
           species = ?,
+          catalogPlantId = ?,
           photoUri = ?,
           photoPath = ?,
           lastWateringDate = ?,
@@ -1141,6 +1256,7 @@ async function pullPlants(userId: string) {
       `,
       remotePlant.name,
       remotePlant.species,
+      remotePlant.catalog_plant_id,
       remotePlant.photo_url,
       remotePlant.photo_path,
       remotePlant.last_watering_date,
@@ -1387,6 +1503,73 @@ async function pullLogs(userId: string) {
   }
 
   return pulled;
+}
+
+async function pullPlantCatalog() {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from('plant_catalog')
+    .select('*')
+    .order('name_ru', { ascending: true });
+
+  if (error) {
+    if (isMissingCatalogTableError(error, 'plant_catalog')) {
+      console.warn('[sync] Таблица plant_catalog ещё не создана в Supabase. Pull справочника пропущен.');
+      return null;
+    }
+
+    throw error;
+  }
+
+  return (data ?? []) as RemoteCatalogPlantRow[];
+}
+
+async function pullPlantCatalogSymptoms() {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from('plant_catalog_symptoms')
+    .select('*')
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    if (isMissingCatalogTableError(error, 'plant_catalog_symptoms')) {
+      console.warn(
+        '[sync] Таблица plant_catalog_symptoms ещё не создана в Supabase. Pull симптомов справочника пропущен.'
+      );
+      return null;
+    }
+
+    throw error;
+  }
+
+  return (data ?? []) as RemoteCatalogSymptomRow[];
+}
+
+export async function syncPlantCatalogForCurrentUser() {
+  await initializeDatabase();
+
+  const [remotePlants, remoteSymptoms] = await Promise.all([
+    pullPlantCatalog(),
+    pullPlantCatalogSymptoms(),
+  ]);
+
+  if (!remotePlants || !remoteSymptoms) {
+    return {
+      plants: 0,
+      symptoms: 0,
+      skipped: true,
+    };
+  }
+
+  await replacePlantCatalogLocally(
+    remotePlants.map(mapRemoteCatalogPlant),
+    remoteSymptoms.map(mapRemoteCatalogSymptom)
+  );
+
+  return {
+    plants: remotePlants.length,
+    symptoms: remoteSymptoms.length,
+  };
 }
 
 async function pullAiAnalyses(userId: string) {
@@ -1774,6 +1957,7 @@ export async function syncAllForCurrentUser(): Promise<SyncResult> {
   const pulledChatThreads = await pullChatThreads(userId);
   const pulledChatMessages = await pullChatMessages(userId);
   const pulledSettings = await pullSettings(userId);
+  const pulledCatalog = await syncPlantCatalogForCurrentUser();
 
   await refreshAllPlantCareState();
   await refreshScheduledNotificationsAsync();
@@ -1789,6 +1973,8 @@ export async function syncAllForCurrentUser(): Promise<SyncResult> {
       pulledPlants +
       pulledTasks +
       pulledLogs +
+      pulledCatalog.plants +
+      pulledCatalog.symptoms +
       pulledAiAnalyses +
       pulledChatThreads +
       pulledChatMessages +

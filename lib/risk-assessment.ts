@@ -1,5 +1,4 @@
 import { CARE_TYPES } from '@/constants/careTypes';
-import { getPlantGuideEntryByName } from '@/constants/plantGuide';
 import { getDaysSince, isDateBeforeToday } from '@/lib/date';
 import type { CareLog } from '@/types/log';
 import { parseConditionTags, type Plant } from '@/types/plant';
@@ -25,7 +24,7 @@ export function buildPlantRiskAssessment(
   plant: Plant,
   tasks: CareTask[] = [],
   logs: CareLog[] = [],
-  guideEntry: PlantGuideEntry | null = getPlantGuideEntryByName(plant.species)
+  guideEntry: PlantGuideEntry | null = null
 ): RiskAssessmentResult {
   const tags = parseConditionTags(plant.conditionTags);
   const reasons: string[] = [];

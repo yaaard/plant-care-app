@@ -1,18 +1,7 @@
+import type { PlantCatalogPlant } from '@/types/plant-catalog';
 import type { CareTaskType } from '@/types/task';
 
-export interface PlantGuideEntry {
-  id: string;
-  name: string;
-  recommendedWateringIntervalDays: number;
-  lightLevel: string;
-  humidityLevel: string;
-  temperatureRange: string;
-  careTips: string;
-  riskNotes: string;
-  inspectionIntervalDays: number;
-  sprayingIntervalDays: number | null;
-  fertilizingIntervalDays: number;
-}
+export type PlantGuideEntry = PlantCatalogPlant;
 
 export interface RecommendationResult {
   summary: string;

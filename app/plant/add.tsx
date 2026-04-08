@@ -37,6 +37,7 @@ export default function AddPlantScreen() {
       <PlantForm
         errorMessage={errorMessage}
         loading={saving}
+        mode="add"
         onSubmit={handleSubmit}
         submitLabel="Сохранить растение"
       />

@@ -52,6 +52,10 @@ async function ensurePlantColumns() {
       sql: 'ALTER TABLE plants ADD COLUMN photoPath TEXT',
     },
     {
+      name: 'catalogPlantId',
+      sql: 'ALTER TABLE plants ADD COLUMN catalogPlantId TEXT',
+    },
+    {
       name: 'userId',
       sql: 'ALTER TABLE plants ADD COLUMN userId TEXT',
     },
@@ -394,8 +398,14 @@ async function ensureIndexes() {
   await database.execAsync(`
     CREATE INDEX IF NOT EXISTS idx_plants_name ON plants(name);
     CREATE INDEX IF NOT EXISTS idx_plants_risk_level ON plants(riskLevel);
+    CREATE INDEX IF NOT EXISTS idx_plants_catalog_plant_id ON plants(catalogPlantId);
     CREATE INDEX IF NOT EXISTS idx_plants_user_id ON plants(userId);
     CREATE INDEX IF NOT EXISTS idx_plants_sync_status ON plants(syncStatus);
+
+    CREATE INDEX IF NOT EXISTS idx_plant_catalog_slug ON plant_catalog(slug);
+    CREATE INDEX IF NOT EXISTS idx_plant_catalog_name_ru ON plant_catalog(nameRu);
+    CREATE INDEX IF NOT EXISTS idx_plant_catalog_name_latin ON plant_catalog(nameLatin);
+    CREATE INDEX IF NOT EXISTS idx_plant_catalog_symptoms_plant_id ON plant_catalog_symptoms(plantCatalogId);
 
     CREATE INDEX IF NOT EXISTS idx_care_tasks_scheduled_date ON care_tasks(scheduledDate);
     CREATE INDEX IF NOT EXISTS idx_care_tasks_plant_id ON care_tasks(plantId);
@@ -450,6 +460,7 @@ export async function initializeDatabase(): Promise<void> {
           id TEXT PRIMARY KEY NOT NULL,
           name TEXT NOT NULL,
           species TEXT NOT NULL,
+          catalogPlantId TEXT,
           photoUri TEXT,
           photoPath TEXT,
           lastWateringDate TEXT,
@@ -557,6 +568,44 @@ export async function initializeDatabase(): Promise<void> {
           syncStatus TEXT NOT NULL DEFAULT 'synced',
           remoteUpdatedAt TEXT,
           FOREIGN KEY (threadId) REFERENCES chat_threads(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS plant_catalog (
+          id TEXT PRIMARY KEY NOT NULL,
+          slug TEXT NOT NULL UNIQUE,
+          nameRu TEXT NOT NULL,
+          nameLatin TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL DEFAULT '',
+          description TEXT NOT NULL DEFAULT '',
+          wateringIntervalMin INTEGER NOT NULL DEFAULT 7,
+          wateringIntervalMax INTEGER NOT NULL DEFAULT 7,
+          lightLevel TEXT NOT NULL DEFAULT '',
+          humidityLevel TEXT NOT NULL DEFAULT '',
+          temperatureMin INTEGER NOT NULL DEFAULT 18,
+          temperatureMax INTEGER NOT NULL DEFAULT 25,
+          careTips TEXT NOT NULL DEFAULT '',
+          riskNotes TEXT NOT NULL DEFAULT '',
+          soilType TEXT NOT NULL DEFAULT '',
+          fertilizingInfo TEXT NOT NULL DEFAULT '',
+          sprayingNeeded INTEGER NOT NULL DEFAULT 0,
+          petSafe INTEGER NOT NULL DEFAULT 0,
+          difficultyLevel TEXT NOT NULL DEFAULT 'средний',
+          inspectionIntervalDays INTEGER NOT NULL DEFAULT 14,
+          sprayingIntervalDays INTEGER,
+          fertilizingIntervalDays INTEGER,
+          createdAt TEXT NOT NULL,
+          updatedAt TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS plant_catalog_symptoms (
+          id TEXT PRIMARY KEY NOT NULL,
+          plantCatalogId TEXT NOT NULL,
+          symptomCode TEXT NOT NULL,
+          symptomNameRu TEXT NOT NULL,
+          possibleCause TEXT NOT NULL DEFAULT '',
+          recommendedAction TEXT NOT NULL DEFAULT '',
+          createdAt TEXT NOT NULL,
+          FOREIGN KEY (plantCatalogId) REFERENCES plant_catalog(id) ON DELETE CASCADE
         );
       `);
 

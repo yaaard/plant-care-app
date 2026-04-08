@@ -1,5 +1,4 @@
 import { CARE_TYPES } from '@/constants/careTypes';
-import { getPlantGuideEntryByName } from '@/constants/plantGuide';
 import { getDaysSince } from '@/lib/date';
 import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
 import type { PlantAiAnalysis } from '@/types/ai-analysis';
@@ -96,7 +95,7 @@ export function buildPlantRecommendations({
   plant,
   tasks = [],
   logs = [],
-  guideEntry = getPlantGuideEntryByName(plant.species),
+  guideEntry = null,
   riskAssessment = buildPlantRiskAssessment(plant, tasks, logs, guideEntry),
   latestAiAnalysis = null,
 }: RecommendationInput): RecommendationResult {

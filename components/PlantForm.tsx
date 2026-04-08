@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -13,22 +15,31 @@ import {
 import { EmptyState } from '@/components/EmptyState';
 import { FormField } from '@/components/FormField';
 import { HealthTagSelector } from '@/components/HealthTagSelector';
+import { SearchBar } from '@/components/SearchBar';
 import {
   HUMIDITY_CONDITION_OPTIONS,
   LIGHT_CONDITION_OPTIONS,
-  PLANT_GUIDE,
 } from '@/constants/plantGuide';
 import { DEFAULT_PLANT_FORM_VALUES } from '@/constants/defaultValues';
+import { usePlantCatalog } from '@/hooks/usePlantCatalog';
 import { todayString } from '@/lib/date';
 import { pickImageFromLibraryAsync } from '@/lib/image-picker';
+import { buildPlantFormAutofillFromCatalog } from '@/lib/plant-catalog-repo';
 import { normalizePlantFormValues, validatePlantForm } from '@/lib/validators';
+import {
+  formatCatalogSummary,
+  type PlantCatalogPlant,
+} from '@/types/plant-catalog';
 import type { PlantFormValues } from '@/types/plant';
+
+type PlantFormMode = 'add' | 'edit';
 
 type PlantFormProps = {
   initialValues?: PlantFormValues;
   submitLabel: string;
   loading?: boolean;
   errorMessage?: string | null;
+  mode?: PlantFormMode;
   onSubmit: (values: PlantFormValues) => Promise<void> | void;
 };
 
@@ -71,13 +82,54 @@ function SelectionGroup({
   );
 }
 
+function CatalogPlantRow({
+  plant,
+  selected,
+  onPress,
+}: {
+  plant: PlantCatalogPlant;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.catalogRow,
+        selected && styles.catalogRowSelected,
+        pressed && styles.pressed,
+      ]}
+    >
+      <View style={styles.catalogRowHeader}>
+        <View style={styles.catalogTitleBlock}>
+          <Text style={styles.catalogName}>{plant.nameRu}</Text>
+          <Text style={styles.catalogLatin}>{plant.nameLatin}</Text>
+        </View>
+        {selected ? <Text style={styles.catalogSelectedLabel}>Выбрано</Text> : null}
+      </View>
+
+      <Text style={styles.catalogMeta}>{plant.category}</Text>
+      <Text numberOfLines={2} style={styles.catalogDescription}>
+        {plant.description}
+      </Text>
+      <Text style={styles.catalogSummary}>{formatCatalogSummary(plant)}</Text>
+    </Pressable>
+  );
+}
+
 export function PlantForm({
   initialValues = DEFAULT_PLANT_FORM_VALUES,
   submitLabel,
   loading = false,
   errorMessage,
+  mode = 'add',
   onSubmit,
 }: PlantFormProps) {
+  const { plants: catalogPlants, loading: catalogLoading, error: catalogError } = usePlantCatalog();
+
+  const [catalogPlantId, setCatalogPlantId] = useState(initialValues.catalogPlantId);
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogModalVisible, setCatalogModalVisible] = useState(false);
   const [name, setName] = useState(initialValues.name);
   const [species, setSpecies] = useState(initialValues.species);
   const [photoUri, setPhotoUri] = useState<string | null>(initialValues.photoUri);
@@ -94,6 +146,9 @@ export function PlantForm({
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   useEffect(() => {
+    setCatalogPlantId(initialValues.catalogPlantId);
+    setCatalogQuery('');
+    setCatalogModalVisible(false);
     setName(initialValues.name);
     setSpecies(initialValues.species);
     setPhotoUri(initialValues.photoUri);
@@ -108,6 +163,24 @@ export function PlantForm({
     setValidationErrors([]);
   }, [initialValues]);
 
+  const selectedCatalogPlant = useMemo(
+    () => catalogPlants.find((item) => item.id === catalogPlantId) ?? null,
+    [catalogPlantId, catalogPlants]
+  );
+
+  const filteredCatalogPlants = useMemo(() => {
+    const normalizedQuery = catalogQuery.trim().toLowerCase();
+
+    if (!normalizedQuery) {
+      return catalogPlants;
+    }
+
+    return catalogPlants.filter((item) => {
+      const searchValue = `${item.nameRu} ${item.nameLatin} ${item.slug}`.toLowerCase();
+      return searchValue.includes(normalizedQuery);
+    });
+  }, [catalogPlants, catalogQuery]);
+
   const handlePickPhoto = async () => {
     const selectedUri = await pickImageFromLibraryAsync();
 
@@ -116,24 +189,72 @@ export function PlantForm({
     }
   };
 
-  const handleGuideSpeciesSelect = (guideName: string) => {
-    setSpecies(guideName);
+  const applyCatalogSelection = (
+    plant: PlantCatalogPlant,
+    overwriteCareFields: boolean
+  ) => {
+    const autofill = buildPlantFormAutofillFromCatalog(plant);
 
-    const guideEntry = PLANT_GUIDE.find((item) => item.name === guideName);
+    setCatalogPlantId(plant.id);
+    setSpecies(plant.nameRu);
 
-    if (!guideEntry) {
+    if (overwriteCareFields) {
+      setWateringIntervalDays(String(autofill.wateringIntervalDays));
+      setLightCondition(autofill.lightCondition);
+      setHumidityCondition(autofill.humidityCondition);
+      setRoomTemperature(autofill.roomTemperature);
+    }
+
+    setNotes((currentValue) =>
+      currentValue.trim() ? currentValue : autofill.notes
+    );
+
+    setCatalogModalVisible(false);
+    setCatalogQuery('');
+  };
+
+  const handleCatalogSelection = (plant: PlantCatalogPlant) => {
+    const hasManualCareValues =
+      Boolean(lightCondition.trim()) ||
+      Boolean(humidityCondition.trim()) ||
+      Boolean(roomTemperature.trim()) ||
+      Boolean(notes.trim()) ||
+      Number(wateringIntervalDays) !== initialValues.wateringIntervalDays;
+
+    if (
+      mode === 'edit' &&
+      plant.id !== catalogPlantId &&
+      hasManualCareValues
+    ) {
+      Alert.alert(
+        'Обновить типовые параметры?',
+        'Можно только связать растение со справочником или сразу обновить базовые параметры ухода по каталогу.',
+        [
+          {
+            text: 'Отмена',
+            style: 'cancel',
+          },
+          {
+            text: 'Только связать',
+            onPress: () => applyCatalogSelection(plant, false),
+          },
+          {
+            text: 'Обновить поля',
+            onPress: () => applyCatalogSelection(plant, true),
+          },
+        ]
+      );
       return;
     }
 
-    setWateringIntervalDays(String(guideEntry.recommendedWateringIntervalDays));
-    setLightCondition((currentValue) => currentValue || guideEntry.lightLevel);
-    setHumidityCondition((currentValue) => currentValue || guideEntry.humidityLevel);
+    applyCatalogSelection(plant, true);
   };
 
   const handleSubmit = async () => {
     const values = normalizePlantFormValues({
       name,
       species,
+      catalogPlantId,
       photoUri,
       lastWateringDate,
       wateringIntervalDays: Number(wateringIntervalDays),
@@ -205,37 +326,54 @@ export function PlantForm({
           autoCapitalize="words"
           label="Название растения"
           onChangeText={setName}
-          placeholder="Например, Зелёный уголок"
+          placeholder="Например, Зеленый уголок"
           value={name}
         />
 
         <View style={styles.guideCard}>
-          <Text style={styles.guideTitle}>Вид из локального справочника</Text>
+          <Text style={styles.guideTitle}>Вид из справочника</Text>
           <Text style={styles.guideSubtitle}>
-            Можно выбрать распространённый вид, чтобы сразу подставить базовые ориентиры по
-            поливу и условиям.
+            Выберите растение из каталога, чтобы сразу подставить базовые параметры ухода.
           </Text>
 
-          <View style={styles.optionsWrap}>
-            {PLANT_GUIDE.map((item) => {
-              const selected = species === item.name;
+          {selectedCatalogPlant ? (
+            <View style={styles.selectedCatalogCard}>
+              <Text style={styles.selectedCatalogName}>{selectedCatalogPlant.nameRu}</Text>
+              <Text style={styles.selectedCatalogLatin}>{selectedCatalogPlant.nameLatin}</Text>
+              <Text style={styles.selectedCatalogSummary}>
+                {formatCatalogSummary(selectedCatalogPlant)}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.selectedCatalogEmpty}>
+              Справочная запись пока не выбрана. Можно продолжить и вручную.
+            </Text>
+          )}
 
-              return (
-                <Pressable
-                  key={item.id}
-                  onPress={() => handleGuideSpeciesSelect(item.name)}
-                  style={({ pressed }) => [
-                    styles.optionChip,
-                    selected && styles.optionChipSelected,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={[styles.optionChipText, selected && styles.optionChipTextSelected]}>
-                    {item.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
+          <View style={styles.catalogActions}>
+            <Pressable
+              onPress={() => setCatalogModalVisible(true)}
+              style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.secondaryButtonText}>
+                {selectedCatalogPlant ? 'Изменить вид' : 'Выбрать из справочника'}
+              </Text>
+            </Pressable>
+
+            {catalogPlantId ? (
+              <Pressable
+                onPress={() => setCatalogPlantId(null)}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  styles.secondaryDangerButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.secondaryButtonText, styles.secondaryDangerButtonText]}>
+                  Убрать связь
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 
@@ -342,6 +480,78 @@ export function PlantForm({
           <Text style={styles.primaryButtonText}>{loading ? 'Сохранение...' : submitLabel}</Text>
         </Pressable>
       </ScrollView>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setCatalogModalVisible(false)}
+        transparent
+        visible={catalogModalVisible}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderText}>
+                <Text style={styles.modalTitle}>Выбор из справочника</Text>
+                <Text style={styles.modalSubtitle}>
+                  Поиск по русскому и латинскому названию.
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={() => setCatalogModalVisible(false)}
+                style={({ pressed }) => [styles.modalCloseButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.modalCloseText}>Закрыть</Text>
+              </Pressable>
+            </View>
+
+            <SearchBar
+              onChangeText={setCatalogQuery}
+              placeholder="Например, монстера или monstera"
+              value={catalogQuery}
+            />
+
+            <ScrollView
+              contentContainerStyle={styles.modalList}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {catalogLoading ? (
+                <Text style={styles.helperText}>Загружаем локальный каталог...</Text>
+              ) : null}
+
+              {catalogError ? (
+                <EmptyState
+                  description={catalogError}
+                  title="Справочник временно недоступен"
+                />
+              ) : null}
+
+              {!catalogLoading && !catalogError && filteredCatalogPlants.length === 0 ? (
+                <EmptyState
+                  description={
+                    catalogPlants.length === 0
+                      ? 'Локальный каталог пока пуст. После синхронизации он появится и будет доступен офлайн.'
+                      : 'По вашему запросу ничего не найдено.'
+                  }
+                  title={catalogPlants.length === 0 ? 'Каталог ещё не загружен' : 'Ничего не найдено'}
+                />
+              ) : null}
+
+              {!catalogLoading && !catalogError
+                ? filteredCatalogPlants.map((plant) => (
+                    <CatalogPlantRow
+                      key={plant.id}
+                      onPress={() => handleCatalogSelection(plant)}
+                      plant={plant}
+                      selected={plant.id === catalogPlantId}
+                    />
+                  ))
+                : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -429,6 +639,39 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginBottom: 12,
   },
+  selectedCatalogCard: {
+    backgroundColor: '#f7faf7',
+    borderRadius: 14,
+    marginBottom: 12,
+    padding: 12,
+  },
+  selectedCatalogName: {
+    color: '#163020',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  selectedCatalogLatin: {
+    color: '#667085',
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  selectedCatalogSummary: {
+    color: '#2f6f3e',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  selectedCatalogEmpty: {
+    color: '#667085',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  catalogActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
   optionsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -500,6 +743,111 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     backgroundColor: '#7fa48a',
+  },
+  modalOverlay: {
+    backgroundColor: 'rgba(22, 48, 32, 0.36)',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#f6f7f2',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '86%',
+    padding: 16,
+    paddingBottom: 24,
+  },
+  modalHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  modalHeaderText: {
+    flex: 1,
+    marginRight: 12,
+  },
+  modalTitle: {
+    color: '#163020',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    color: '#667085',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  modalCloseButton: {
+    paddingVertical: 4,
+  },
+  modalCloseText: {
+    color: '#2f6f3e',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalList: {
+    paddingBottom: 20,
+  },
+  catalogRow: {
+    backgroundColor: '#ffffff',
+    borderColor: '#d5ddd2',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 10,
+    padding: 14,
+  },
+  catalogRowSelected: {
+    borderColor: '#2f6f3e',
+    backgroundColor: '#edf7ef',
+  },
+  catalogRowHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  catalogTitleBlock: {
+    flex: 1,
+    marginRight: 12,
+  },
+  catalogName: {
+    color: '#163020',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  catalogLatin: {
+    color: '#667085',
+    fontSize: 13,
+    marginBottom: 6,
+  },
+  catalogSelectedLabel: {
+    color: '#2f6f3e',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  catalogMeta: {
+    color: '#2f6f3e',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  catalogDescription: {
+    color: '#163020',
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 8,
+  },
+  catalogSummary: {
+    color: '#667085',
+    fontSize: 12,
+  },
+  helperText: {
+    color: '#667085',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+    textAlign: 'center',
   },
   pressed: {
     opacity: 0.9,

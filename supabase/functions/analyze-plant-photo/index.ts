@@ -24,6 +24,7 @@ type PlantRow = {
   id: string;
   name: string;
   species: string;
+  catalog_plant_id: string | null;
   notes: string;
   light_condition: string;
   humidity_condition: string;
@@ -35,6 +36,33 @@ type PlantRow = {
   watering_interval_days: number;
   photo_path: string | null;
   photo_url: string | null;
+};
+
+type CatalogRow = {
+  id: string;
+  name_ru: string;
+  name_latin: string;
+  category: string;
+  description: string;
+  watering_interval_min: number;
+  watering_interval_max: number;
+  light_level: string;
+  humidity_level: string;
+  temperature_min: number;
+  temperature_max: number;
+  care_tips: string;
+  risk_notes: string;
+  soil_type: string;
+  fertilizing_info: string;
+  spraying_needed: boolean;
+  pet_safe: boolean;
+  difficulty_level: string;
+};
+
+type CatalogSymptomRow = {
+  symptom_name_ru: string;
+  possible_cause: string;
+  recommended_action: string;
 };
 
 type AnalysisRow = {
@@ -124,6 +152,46 @@ function buildPlantContext(plant: PlantRow) {
   ].join('\n');
 }
 
+function buildCatalogContext(
+  catalogPlant: CatalogRow | null,
+  symptoms: CatalogSymptomRow[]
+) {
+  if (!catalogPlant) {
+    return '';
+  }
+
+  const symptomLines =
+    symptoms.length > 0
+      ? symptoms
+          .slice(0, 5)
+          .map(
+            (symptom) =>
+              `- ${symptom.symptom_name_ru}: причина — ${symptom.possible_cause}; действие — ${symptom.recommended_action}`
+          )
+          .join('\n')
+      : 'Нет дополнительных симптомов.';
+
+  return [
+    'Справочный контекст по виду растения:',
+    `Русское название: ${catalogPlant.name_ru}`,
+    `Латинское название: ${catalogPlant.name_latin}`,
+    `Категория: ${catalogPlant.category}`,
+    `Описание: ${catalogPlant.description}`,
+    `Типовой полив: примерно раз в ${catalogPlant.watering_interval_min}-${catalogPlant.watering_interval_max} дней`,
+    `Типовой свет: ${catalogPlant.light_level}`,
+    `Типовая влажность: ${catalogPlant.humidity_level}`,
+    `Типовая температура: ${catalogPlant.temperature_min}-${catalogPlant.temperature_max}°C`,
+    `Советы по уходу: ${catalogPlant.care_tips}`,
+    `Типичные риски: ${catalogPlant.risk_notes}`,
+    `Грунт: ${catalogPlant.soil_type}`,
+    `Подкормка: ${catalogPlant.fertilizing_info}`,
+    `Опрыскивание: ${catalogPlant.spraying_needed ? 'обычно полезно' : 'обычно не требуется'}`,
+    `Безопасно для животных: ${catalogPlant.pet_safe ? 'да' : 'нет'}`,
+    `Сложность ухода: ${catalogPlant.difficulty_level}`,
+    `Типовые симптомы:\n${symptomLines}`,
+  ].join('\n');
+}
+
 function getSystemInstruction() {
   return [
     'Ты помогаешь анализировать фотографии комнатных растений.',
@@ -201,6 +269,7 @@ Deno.serve(async (request) => {
           id,
           name,
           species,
+          catalog_plant_id,
           notes,
           light_condition,
           humidity_condition,
@@ -226,6 +295,54 @@ Deno.serve(async (request) => {
       return jsonResponse(404, {
         error: 'Растение не найдено или доступ к нему запрещён.',
       });
+    }
+
+    let catalogPlant: CatalogRow | null = null;
+    let catalogSymptoms: CatalogSymptomRow[] = [];
+
+    if (plant.catalog_plant_id) {
+      const [{ data: nextCatalogPlant, error: catalogError }, { data: nextCatalogSymptoms, error: symptomsError }] =
+        await Promise.all([
+          supabase
+            .from('plant_catalog')
+            .select(
+              `
+                id,
+                name_ru,
+                name_latin,
+                category,
+                description,
+                watering_interval_min,
+                watering_interval_max,
+                light_level,
+                humidity_level,
+                temperature_min,
+                temperature_max,
+                care_tips,
+                risk_notes,
+                soil_type,
+                fertilizing_info,
+                spraying_needed,
+                pet_safe,
+                difficulty_level
+              `
+            )
+            .eq('id', plant.catalog_plant_id)
+            .maybeSingle<CatalogRow>(),
+          supabase
+            .from('plant_catalog_symptoms')
+            .select('symptom_name_ru, possible_cause, recommended_action')
+            .eq('plant_catalog_id', plant.catalog_plant_id)
+            .limit(5),
+        ]);
+
+      if (!catalogError) {
+        catalogPlant = nextCatalogPlant ?? null;
+      }
+
+      if (!symptomsError) {
+        catalogSymptoms = (nextCatalogSymptoms ?? []) as CatalogSymptomRow[];
+      }
     }
 
     const photoPath = plant.photo_path ?? null;
@@ -280,6 +397,7 @@ Deno.serve(async (request) => {
               text: [
                 'Проанализируй фото комнатного растения и верни только JSON по схеме.',
                 buildPlantContext(plant),
+                buildCatalogContext(catalogPlant, catalogSymptoms),
               ].join('\n\n'),
             },
             imagePart,

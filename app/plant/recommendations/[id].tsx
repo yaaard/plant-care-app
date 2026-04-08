@@ -8,7 +8,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { RecommendationCard } from '@/components/RecommendationCard';
 import { RiskBadge } from '@/components/RiskBadge';
 import { getLatestAiAnalysisByPlantId } from '@/lib/ai-analyses-repo';
-import { getPlantGuideEntryByName } from '@/constants/plantGuide';
+import { findCatalogPlantForPlant } from '@/lib/plant-catalog-repo';
 import { formatCareType } from '@/lib/formatters';
 import { getLogsByPlantId } from '@/lib/logs-repo';
 import { getPlantById } from '@/lib/plants-repo';
@@ -19,6 +19,7 @@ import { getErrorMessage } from '@/lib/validators';
 import type { PlantAiAnalysis } from '@/types/ai-analysis';
 import type { CareLog } from '@/types/log';
 import type { Plant } from '@/types/plant';
+import type { PlantGuideEntry } from '@/types/recommendation';
 import type { CareTask } from '@/types/task';
 
 function normalizeParam(value: string | string[] | undefined) {
@@ -31,6 +32,7 @@ export default function PlantRecommendationsScreen() {
   const plantId = normalizeParam(params.id);
 
   const [plant, setPlant] = useState<Plant | null>(null);
+  const [guideEntry, setGuideEntry] = useState<PlantGuideEntry | null>(null);
   const [tasks, setTasks] = useState<CareTask[]>([]);
   const [logs, setLogs] = useState<CareLog[]>([]);
   const [latestAiAnalysis, setLatestAiAnalysis] = useState<PlantAiAnalysis | null>(null);
@@ -53,8 +55,10 @@ export default function PlantRecommendationsScreen() {
         getLogsByPlantId(plantId),
         getLatestAiAnalysisByPlantId(plantId),
       ]);
+      const nextGuideEntry = nextPlant ? await findCatalogPlantForPlant(nextPlant) : null;
 
       setPlant(nextPlant);
+      setGuideEntry(nextGuideEntry);
       setTasks(nextTasks);
       setLogs(nextLogs);
       setLatestAiAnalysis(nextLatestAiAnalysis);
@@ -72,10 +76,6 @@ export default function PlantRecommendationsScreen() {
     }, [loadData])
   );
 
-  const guideEntry = useMemo(
-    () => (plant ? getPlantGuideEntryByName(plant.species) : null),
-    [plant]
-  );
   const riskAssessment = useMemo(
     () => (plant ? buildPlantRiskAssessment(plant, tasks, logs, guideEntry) : null),
     [guideEntry, logs, plant, tasks]

@@ -2,7 +2,6 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { CARE_TYPE_DEFAULT_COMMENTS, CARE_TYPES } from '@/constants/careTypes';
 import { DEFAULT_RISK_LEVEL } from '@/constants/defaultValues';
-import { getPlantGuideEntryByName } from '@/constants/plantGuide';
 import { buildAdaptiveCarePlan } from '@/lib/care-plan';
 import { getNextWateringDate, isDateBeforeToday } from '@/lib/date';
 import { createId, getDatabase, nowIsoString } from '@/lib/db';
@@ -10,6 +9,7 @@ import { initializeDatabase } from '@/lib/db-init';
 import { emitLocalDataChanged } from '@/lib/local-events';
 import { addCareLog, getLogsByPlantId } from '@/lib/logs-repo';
 import { refreshScheduledNotificationsAsync } from '@/lib/notifications';
+import { findCatalogPlantForPlant } from '@/lib/plant-catalog-repo';
 import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
 import { getCurrentSupabaseUserIdAsync } from '@/lib/supabase';
 import { enqueueDeletion } from '@/lib/sync-queue';
@@ -35,6 +35,7 @@ const PLANT_SELECT_COLUMNS = `
   id,
   name,
   species,
+  catalogPlantId,
   photoUri,
   photoPath,
   lastWateringDate,
@@ -96,6 +97,7 @@ function buildPlantRecord(
     id: seed.id,
     name: values.name,
     species: values.species,
+    catalogPlantId: values.catalogPlantId,
     photoUri: values.photoUri,
     photoPath: seed.photoPath,
     lastWateringDate: values.lastWateringDate,
@@ -127,7 +129,7 @@ async function syncPlantDerivedState(
   }
 
   const logs = await getLogsByPlantId(plantId, database);
-  const guideEntry = getPlantGuideEntryByName(plant.species);
+  const guideEntry = await findCatalogPlantForPlant(plant, database);
   const carePlan = buildAdaptiveCarePlan(plant, guideEntry, logs);
 
   await replaceActiveTaskForPlantByType(
@@ -252,6 +254,7 @@ export async function createPlant(values: PlantFormValues): Promise<Plant> {
           id,
           name,
           species,
+          catalogPlantId,
           photoUri,
           photoPath,
           lastWateringDate,
@@ -269,11 +272,12 @@ export async function createPlant(values: PlantFormValues): Promise<Plant> {
           remoteUpdatedAt,
           createdAt,
           updatedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       plant.id,
       plant.name,
       plant.species,
+      plant.catalogPlantId,
       plant.photoUri,
       plant.photoPath ?? null,
       plant.lastWateringDate,
@@ -332,6 +336,7 @@ export async function updatePlant(
         SET
           name = ?,
           species = ?,
+          catalogPlantId = ?,
           photoUri = ?,
           photoPath = ?,
           lastWateringDate = ?,
@@ -352,6 +357,7 @@ export async function updatePlant(
       `,
       updatedPlant.name,
       updatedPlant.species,
+      updatedPlant.catalogPlantId,
       updatedPlant.photoUri,
       updatedPlant.photoPath ?? null,
       updatedPlant.lastWateringDate,

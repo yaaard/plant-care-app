@@ -25,6 +25,7 @@ const PLANT_COLUMNS = `
   id,
   name,
   species,
+  catalogPlantId,
   photoUri,
   photoPath,
   lastWateringDate,
@@ -218,6 +219,7 @@ export async function restoreBackupAsync(backup: AppBackup): Promise<void> {
             id,
             name,
             species,
+            catalogPlantId,
             photoUri,
             photoPath,
             lastWateringDate,
@@ -232,11 +234,12 @@ export async function restoreBackupAsync(backup: AppBackup): Promise<void> {
             lastInspectionDate,
             createdAt,
             updatedAt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         plant.id,
         plant.name,
         plant.species,
+        plant.catalogPlantId,
         plant.photoUri,
         plant.photoPath ?? null,
         plant.lastWateringDate,

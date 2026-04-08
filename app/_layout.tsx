@@ -56,6 +56,7 @@ function RouteGuard() {
     <Stack>
       <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="catalog/[id]" options={{ title: 'Справочник' }} />
       <Stack.Screen name="plant/add" options={{ title: 'Добавить растение' }} />
       <Stack.Screen name="plant/[id]" options={{ title: 'Карточка растения' }} />
       <Stack.Screen name="plant/chat/[id]" options={{ title: 'Помощник по растению' }} />

@@ -22,7 +22,6 @@ import { QuickActionButtons } from '@/components/QuickActionButtons';
 import { RiskBadge } from '@/components/RiskBadge';
 import { SectionTitle } from '@/components/SectionTitle';
 import { getHealthTagLabel } from '@/constants/healthTags';
-import { getPlantGuideEntryByName } from '@/constants/plantGuide';
 import { getLatestAiAnalysisByPlantId } from '@/lib/ai-analyses-repo';
 import {
   formatAiOverallCondition,
@@ -34,6 +33,7 @@ import {
 } from '@/lib/formatters';
 import { getNextWateringDate } from '@/lib/date';
 import { getLogsByPlantId } from '@/lib/logs-repo';
+import { findCatalogPlantForPlant } from '@/lib/plant-catalog-repo';
 import { completePlantTask, deletePlant, getPlantById, markPlantAsWatered } from '@/lib/plants-repo';
 import { buildPlantRecommendations } from '@/lib/recommendations';
 import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
@@ -42,6 +42,7 @@ import { getErrorMessage } from '@/lib/validators';
 import type { PlantAiAnalysis } from '@/types/ai-analysis';
 import type { CareLog } from '@/types/log';
 import { parseConditionTags, type Plant } from '@/types/plant';
+import type { PlantGuideEntry } from '@/types/recommendation';
 import type { CareTask } from '@/types/task';
 
 function normalizeParam(value: string | string[] | undefined) {
@@ -62,6 +63,7 @@ export default function PlantDetailsScreen() {
   const plantId = normalizeParam(params.id);
 
   const [plant, setPlant] = useState<Plant | null>(null);
+  const [guideEntry, setGuideEntry] = useState<PlantGuideEntry | null>(null);
   const [tasks, setTasks] = useState<CareTask[]>([]);
   const [logs, setLogs] = useState<CareLog[]>([]);
   const [latestAiAnalysis, setLatestAiAnalysis] = useState<PlantAiAnalysis | null>(null);
@@ -86,8 +88,10 @@ export default function PlantDetailsScreen() {
         getLogsByPlantId(plantId),
         getLatestAiAnalysisByPlantId(plantId),
       ]);
+      const nextGuideEntry = nextPlant ? await findCatalogPlantForPlant(nextPlant) : null;
 
       setPlant(nextPlant);
+      setGuideEntry(nextGuideEntry);
       setTasks(nextTasks);
       setLogs(nextLogs);
       setLatestAiAnalysis(nextLatestAiAnalysis);
@@ -172,10 +176,6 @@ export default function PlantDetailsScreen() {
     );
   };
 
-  const guideEntry = useMemo(
-    () => (plant ? getPlantGuideEntryByName(plant.species) : null),
-    [plant]
-  );
   const riskAssessment = useMemo(
     () => (plant ? buildPlantRiskAssessment(plant, tasks, logs, guideEntry) : null),
     [guideEntry, logs, plant, tasks]
@@ -306,6 +306,20 @@ export default function PlantDetailsScreen() {
               </Text>
             </View>
           </View>
+
+          {guideEntry ? (
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/catalog/[id]',
+                  params: { id: guideEntry.id },
+                } as unknown as Href)
+              }
+              style={({ pressed }) => [styles.inlineLink, pressed && styles.pressed]}
+            >
+              <Text style={styles.inlineLinkText}>Открыть запись из справочника</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         <View style={styles.card}>
@@ -683,6 +697,15 @@ const styles = StyleSheet.create({
   metaText: {
     color: '#667085',
     fontSize: 12,
+  },
+  inlineLink: {
+    alignSelf: 'flex-start',
+    marginTop: 14,
+  },
+  inlineLinkText: {
+    color: '#2f6f3e',
+    fontSize: 14,
+    fontWeight: '700',
   },
   infoGrid: {
     gap: 12,

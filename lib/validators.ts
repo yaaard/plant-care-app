@@ -126,6 +126,7 @@ export function normalizePlantFormValues(values: PlantFormValues): PlantFormValu
   return {
     name: values.name.trim(),
     species: values.species.trim(),
+    catalogPlantId: values.catalogPlantId?.trim() ? values.catalogPlantId.trim() : null,
     photoUri: values.photoUri?.trim() ? values.photoUri.trim() : null,
     lastWateringDate: values.lastWateringDate?.trim() ? values.lastWateringDate.trim() : null,
     wateringIntervalDays: Math.floor(Number(values.wateringIntervalDays)),
@@ -282,6 +283,7 @@ function normalizeImportedPlants(value: unknown, errors: string[]) {
         id: item.id.trim(),
         name: item.name.trim(),
         species: item.species.trim(),
+        catalogPlantId: getOptionalNullableString(item.catalogPlantId),
         photoUri: getOptionalNullableString(item.photoUri),
         photoPath: getOptionalNullableString(item.photoPath),
         lastWateringDate,

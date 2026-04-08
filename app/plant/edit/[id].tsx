@@ -42,6 +42,7 @@ export default function EditPlantScreen() {
         setInitialValues({
           name: plant.name,
           species: plant.species,
+          catalogPlantId: plant.catalogPlantId,
           photoUri: plant.photoUri,
           lastWateringDate: plant.lastWateringDate,
           wateringIntervalDays: plant.wateringIntervalDays,
@@ -133,6 +134,7 @@ export default function EditPlantScreen() {
         errorMessage={errorMessage}
         initialValues={initialValues}
         loading={saving}
+        mode="edit"
         onSubmit={handleSubmit}
         submitLabel="Сохранить изменения"
       />

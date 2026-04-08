@@ -23,6 +23,7 @@ export interface Plant {
   id: string;
   name: string;
   species: string;
+  catalogPlantId: string | null;
   photoUri: string | null;
   photoPath?: string | null;
   lastWateringDate: string | null;
@@ -45,6 +46,7 @@ export interface Plant {
 export interface PlantFormValues {
   name: string;
   species: string;
+  catalogPlantId: string | null;
   photoUri: string | null;
   lastWateringDate: string | null;
   wateringIntervalDays: number;

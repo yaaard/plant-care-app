@@ -1,102 +1,131 @@
 import { useState } from 'react';
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { type Href, useRouter } from 'expo-router';
 
 import { EmptyState } from '@/components/EmptyState';
+import { SearchBar } from '@/components/SearchBar';
 import { SectionTitle } from '@/components/SectionTitle';
-import { PLANT_GUIDE } from '@/constants/plantGuide';
+import { usePlantCatalog } from '@/hooks/usePlantCatalog';
+import { syncPlantCatalog } from '@/lib/plant-catalog-repo';
+import { getErrorMessage } from '@/lib/validators';
+import {
+  formatCatalogSummary,
+  formatCatalogTemperatureRange,
+} from '@/types/plant-catalog';
 
 export default function GuideScreen() {
-  const [expandedId, setExpandedId] = useState<string | null>(PLANT_GUIDE[0]?.id ?? null);
+  const router = useRouter();
+  const [query, setQuery] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const { plants, loading, error, reload } = usePlantCatalog(query);
 
-  if (PLANT_GUIDE.length === 0) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.content}>
-          <EmptyState
-            description="Локальная база знаний пока не заполнена."
-            title="Справочник пуст"
-          />
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const handleSyncCatalog = async () => {
+    setSyncing(true);
+
+    try {
+      await syncPlantCatalog();
+      await reload();
+    } catch (error) {
+      Alert.alert(
+        'Не удалось синхронизировать каталог',
+        getErrorMessage(error, 'Попробуйте повторить синхронизацию позже.')
+      );
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <SectionTitle title="Справочник растений" />
         <Text style={styles.subtitle}>
-          Эти ориентиры используются и в модуле рекомендаций: по ним приложение сравнивает
-          текущие условия, интервалы ухода и признаки состояния.
+          Каталог используется как база типовых знаний для выбора вида, рекомендаций и AI-контекста.
+          После синхронизации он доступен и офлайн.
         </Text>
 
-        {PLANT_GUIDE.map((item) => {
-          const expanded = expandedId === item.id;
+        <SearchBar
+          onChangeText={setQuery}
+          placeholder="Поиск по русскому или латинскому названию"
+          value={query}
+        />
 
-          return (
-            <Pressable
-              key={item.id}
-              onPress={() => setExpandedId(expanded ? null : item.id)}
-              style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-            >
-              <View style={styles.cardHeader}>
-                <View style={styles.titleBlock}>
-                  <Text style={styles.title}>{item.name}</Text>
-                  <Text style={styles.meta}>
-                    Полив примерно раз в {item.recommendedWateringIntervalDays} дн.
-                  </Text>
+        {loading ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color="#2f6f3e" size="large" />
+            <Text style={styles.centeredText}>Загружаем локальный каталог...</Text>
+          </View>
+        ) : null}
+
+        {!loading && error ? (
+          <EmptyState
+            actionLabel={syncing ? 'Синхронизация...' : 'Попробовать синхронизацию'}
+            description={error}
+            onActionPress={() => {
+              void handleSyncCatalog();
+            }}
+            title="Не удалось открыть справочник"
+          />
+        ) : null}
+
+        {!loading && !error && plants.length === 0 ? (
+          <EmptyState
+            actionLabel={syncing ? 'Синхронизация...' : 'Загрузить каталог'}
+            description={
+              query.trim()
+                ? 'По вашему запросу ничего не найдено.'
+                : 'Каталог пока пуст. После синхронизации он появится и будет доступен офлайн.'
+            }
+            onActionPress={() => {
+              if (!query.trim()) {
+                void handleSyncCatalog();
+              } else {
+                setQuery('');
+              }
+            }}
+            title={query.trim() ? 'Ничего не найдено' : 'Каталог ещё не загружен'}
+          />
+        ) : null}
+
+        {!loading && !error
+          ? plants.map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() =>
+                  router.push({
+                    pathname: '/catalog/[id]',
+                    params: { id: item.id },
+                  } as unknown as Href)
+                }
+                style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+              >
+                <Text style={styles.title}>{item.nameRu}</Text>
+                <Text style={styles.latinTitle}>{item.nameLatin}</Text>
+                <Text numberOfLines={3} style={styles.description}>
+                  {item.description}
+                </Text>
+
+                <View style={styles.metaWrap}>
+                  <Text style={styles.metaChip}>{item.difficultyLevel}</Text>
+                  <Text style={styles.metaChip}>{item.category}</Text>
                 </View>
-                <Text style={styles.expandLabel}>{expanded ? 'Скрыть' : 'Открыть'}</Text>
-              </View>
 
-              {expanded ? (
-                <View style={styles.details}>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Освещение</Text>
-                    <Text style={styles.detailValue}>{item.lightLevel}</Text>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Влажность</Text>
-                    <Text style={styles.detailValue}>{item.humidityLevel}</Text>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Температура</Text>
-                    <Text style={styles.detailValue}>{item.temperatureRange}</Text>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Осмотр</Text>
-                    <Text style={styles.detailValue}>примерно раз в {item.inspectionIntervalDays} дн.</Text>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Опрыскивание</Text>
-                    <Text style={styles.detailValue}>
-                      {item.sprayingIntervalDays
-                        ? `примерно раз в ${item.sprayingIntervalDays} дн.`
-                        : 'обычно не требуется'}
-                    </Text>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Подкормка</Text>
-                    <Text style={styles.detailValue}>
-                      примерно раз в {item.fertilizingIntervalDays} дн.
-                    </Text>
-                  </View>
-
-                  <Text style={styles.sectionLabel}>Советы по уходу</Text>
-                  <Text style={styles.bodyText}>{item.careTips}</Text>
-
-                  <Text style={styles.sectionLabel}>Типичные ошибки</Text>
-                  <Text style={styles.bodyText}>{item.riskNotes}</Text>
-                </View>
-              ) : null}
-            </Pressable>
-          );
-        })}
+                <Text style={styles.summary}>{formatCatalogSummary(item)}</Text>
+                <Text style={styles.summary}>
+                  Температура: {formatCatalogTemperatureRange(item)}
+                </Text>
+              </Pressable>
+            ))
+          : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -117,6 +146,17 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginBottom: 16,
   },
+  centered: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  centeredText: {
+    color: '#163020',
+    fontSize: 15,
+    marginTop: 12,
+    textAlign: 'center',
+  },
   card: {
     backgroundColor: '#ffffff',
     borderColor: '#d5ddd2',
@@ -125,57 +165,44 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 16,
   },
-  cardHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  titleBlock: {
-    flex: 1,
-    marginRight: 12,
-  },
   title: {
     color: '#163020',
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 4,
-  },
-  meta: {
-    color: '#667085',
-    fontSize: 13,
-  },
-  expandLabel: {
-    color: '#2f6f3e',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  details: {
-    marginTop: 14,
-  },
-  detailRow: {
-    marginBottom: 10,
-  },
-  detailLabel: {
-    color: '#667085',
-    fontSize: 12,
     marginBottom: 2,
   },
-  detailValue: {
-    color: '#163020',
-    fontSize: 15,
-    fontWeight: '600',
+  latinTitle: {
+    color: '#667085',
+    fontSize: 13,
+    marginBottom: 10,
   },
-  sectionLabel: {
-    color: '#163020',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 6,
-    marginTop: 8,
-  },
-  bodyText: {
+  description: {
     color: '#163020',
     fontSize: 14,
     lineHeight: 21,
+    marginBottom: 12,
+  },
+  metaWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  metaChip: {
+    backgroundColor: '#edf7ef',
+    borderRadius: 999,
+    color: '#2f6f3e',
+    fontSize: 12,
+    fontWeight: '700',
+    overflow: 'hidden',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  summary: {
+    color: '#667085',
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 4,
   },
   pressed: {
     opacity: 0.92,
