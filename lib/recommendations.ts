@@ -2,6 +2,7 @@ import { CARE_TYPES } from '@/constants/careTypes';
 import { getPlantGuideEntryByName } from '@/constants/plantGuide';
 import { getDaysSince } from '@/lib/date';
 import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
+import type { PlantAiAnalysis } from '@/types/ai-analysis';
 import type { CareLog } from '@/types/log';
 import { parseConditionTags, type Plant } from '@/types/plant';
 import type { PlantGuideEntry, RecommendationResult } from '@/types/recommendation';
@@ -14,6 +15,7 @@ type RecommendationInput = {
   logs?: CareLog[];
   guideEntry?: PlantGuideEntry | null;
   riskAssessment?: RiskAssessmentResult;
+  latestAiAnalysis?: PlantAiAnalysis | null;
 };
 
 function normalizeText(value: string) {
@@ -96,6 +98,7 @@ export function buildPlantRecommendations({
   logs = [],
   guideEntry = getPlantGuideEntryByName(plant.species),
   riskAssessment = buildPlantRiskAssessment(plant, tasks, logs, guideEntry),
+  latestAiAnalysis = null,
 }: RecommendationInput): RecommendationResult {
   const tags = parseConditionTags(plant.conditionTags);
   const daysSinceWatering = getDaysSince(plant.lastWateringDate);
@@ -198,7 +201,49 @@ export function buildPlantRecommendations({
   }
 
   const lightAdvice = getLightAdvice(plant.lightCondition, guideEntry);
-  const humidityAdvice = getHumidityAdvice(plant.humidityCondition, guideEntry);
+  let nextLightAdvice = getLightAdvice(plant.lightCondition, guideEntry);
+  let nextHumidityAdvice = getHumidityAdvice(plant.humidityCondition, guideEntry);
+
+  if (latestAiAnalysis) {
+    pushUnique(
+      highlights,
+      `Последний AI-анализ: ${latestAiAnalysis.summary}`
+    );
+
+    latestAiAnalysis.observedSigns.forEach((sign) =>
+      pushUnique(diagnosisHints, `По фото замечен признак: ${sign}`)
+    );
+
+    latestAiAnalysis.possibleCauses.forEach((cause) =>
+      pushUnique(riskWarnings, `AI предполагает: ${cause}`)
+    );
+
+    latestAiAnalysis.recommendedActions.forEach((action) =>
+      pushUnique(priorityChecks, action)
+    );
+
+    if (latestAiAnalysis.wateringAdvice.trim()) {
+      wateringAdvice = `${wateringAdvice} Также по фото рекомендуется: ${latestAiAnalysis.wateringAdvice}`;
+    }
+
+    if (latestAiAnalysis.lightAdvice.trim()) {
+      nextLightAdvice = `${nextLightAdvice} Также по фото рекомендуется: ${latestAiAnalysis.lightAdvice}`;
+    }
+
+    if (latestAiAnalysis.humidityAdvice.trim()) {
+      nextHumidityAdvice = `${nextHumidityAdvice} Также по фото рекомендуется: ${latestAiAnalysis.humidityAdvice}`;
+    }
+
+    pushUnique(personalizedTips, latestAiAnalysis.confidenceNote);
+
+    if (latestAiAnalysis.urgency === 'high') {
+      pushTaskType(suggestedCareTypes, CARE_TYPES.INSPECTION);
+      pushUnique(
+        priorityChecks,
+        'Сначала проверьте листья, стебли и влажность почвы, а уже затем меняйте режим ухода.'
+      );
+    }
+  }
 
   if (riskWarnings.length === 0) {
     pushUnique(highlights, 'Серьёзных факторов риска сейчас не видно.');
@@ -220,8 +265,8 @@ export function buildPlantRecommendations({
   return {
     summary,
     wateringAdvice,
-    lightAdvice,
-    humidityAdvice,
+    lightAdvice: nextLightAdvice,
+    humidityAdvice: nextHumidityAdvice,
     riskWarnings,
     diagnosisHints,
     personalizedTips,

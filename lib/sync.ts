@@ -64,6 +64,47 @@ type RemoteSettingsRow = {
   updated_at: string;
 };
 
+type RemoteAiAnalysisRow = {
+  id: string;
+  user_id: string;
+  plant_id: string;
+  photo_path: string | null;
+  model_name: string;
+  summary: string;
+  overall_condition: 'healthy' | 'needs_attention' | 'at_risk';
+  urgency: 'low' | 'medium' | 'high';
+  observed_signs: string[] | null;
+  possible_causes: string[] | null;
+  watering_advice: string;
+  light_advice: string;
+  humidity_advice: string;
+  recommended_actions: string[] | null;
+  confidence_note: string;
+  raw_json: Record<string, unknown> | string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type RemoteChatThreadRow = {
+  id: string;
+  user_id: string;
+  plant_id: string | null;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type RemoteChatMessageRow = {
+  id: string;
+  thread_id: string;
+  user_id: string;
+  role: 'user' | 'assistant' | 'system';
+  text: string;
+  image_path: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type LocalPlantRecord = {
   id: string;
   name: string;
@@ -123,6 +164,53 @@ type LocalDeletionRecord = {
   createdAt: string;
 };
 
+type LocalAiAnalysisRecord = {
+  id: string;
+  plantId: string;
+  userId: string | null;
+  photoPath: string | null;
+  modelName: string;
+  summary: string;
+  overallCondition: 'healthy' | 'needs_attention' | 'at_risk';
+  urgency: 'low' | 'medium' | 'high';
+  observedSigns: string;
+  possibleCauses: string;
+  wateringAdvice: string;
+  lightAdvice: string;
+  humidityAdvice: string;
+  recommendedActions: string;
+  confidenceNote: string;
+  rawJson: string;
+  createdAt: string;
+  updatedAt: string;
+  syncStatus: string;
+  remoteUpdatedAt: string | null;
+};
+
+type LocalChatThreadRecord = {
+  id: string;
+  userId: string | null;
+  plantId: string | null;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+  syncStatus: string;
+  remoteUpdatedAt: string | null;
+};
+
+type LocalChatMessageRecord = {
+  id: string;
+  threadId: string;
+  userId: string | null;
+  role: 'user' | 'assistant' | 'system';
+  text: string;
+  imagePath: string | null;
+  createdAt: string;
+  updatedAt: string;
+  syncStatus: string;
+  remoteUpdatedAt: string | null;
+};
+
 function getLastSyncStorageKey(userId: string) {
   return `${LAST_SYNC_STORAGE_KEY}:${userId}`;
 }
@@ -147,6 +235,58 @@ function safeParseMetadata(value: string) {
   } catch {
     return {};
   }
+}
+
+function serializeStringArray(values: string[] | null | undefined) {
+  return JSON.stringify(
+    Array.from(
+      new Set(
+        (values ?? [])
+          .filter((value): value is string => typeof value === 'string')
+          .map((value) => value.trim())
+          .filter(Boolean)
+      )
+    )
+  );
+}
+
+function serializeRawJson(value: Record<string, unknown> | string | null | undefined) {
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+
+  if (value && typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+
+  return '{}';
+}
+
+function isMissingAiAnalysesTableError(error: { message?: string } | null | undefined) {
+  const message = error?.message?.toLowerCase() ?? '';
+
+  return (
+    message.includes('plant_ai_analyses') &&
+    (message.includes('does not exist') ||
+      message.includes('could not find the table') ||
+      message.includes('relation') ||
+      message.includes('schema cache'))
+  );
+}
+
+function isMissingChatTableError(
+  error: { message?: string } | null | undefined,
+  tableName: 'chat_threads' | 'chat_messages'
+) {
+  const message = error?.message?.toLowerCase() ?? '';
+
+  return (
+    message.includes(tableName) &&
+    (message.includes('does not exist') ||
+      message.includes('could not find the table') ||
+      message.includes('relation') ||
+      message.includes('schema cache'))
+  );
 }
 
 async function getCurrentUserIdOrThrow() {
@@ -279,6 +419,86 @@ async function getLocalDeletionQueue(userId: string) {
   );
 }
 
+async function getLocalAiAnalyses(userId: string) {
+  const database = await getDatabase();
+
+  return database.getAllAsync<LocalAiAnalysisRecord>(
+    `
+      SELECT
+        id,
+        plantId,
+        userId,
+        photoPath,
+        modelName,
+        summary,
+        overallCondition,
+        urgency,
+        observedSigns,
+        possibleCauses,
+        wateringAdvice,
+        lightAdvice,
+        humidityAdvice,
+        recommendedActions,
+        confidenceNote,
+        rawJson,
+        createdAt,
+        COALESCE(NULLIF(updatedAt, ''), createdAt) AS updatedAt,
+        syncStatus,
+        remoteUpdatedAt
+      FROM plant_ai_analyses
+      WHERE userId = ?
+      ORDER BY createdAt DESC
+    `,
+    userId
+  );
+}
+
+async function getLocalChatThreads(userId: string) {
+  const database = await getDatabase();
+
+  return database.getAllAsync<LocalChatThreadRecord>(
+    `
+      SELECT
+        id,
+        userId,
+        plantId,
+        title,
+        createdAt,
+        COALESCE(NULLIF(updatedAt, ''), createdAt) AS updatedAt,
+        syncStatus,
+        remoteUpdatedAt
+      FROM chat_threads
+      WHERE userId = ?
+      ORDER BY updatedAt DESC, createdAt DESC
+    `,
+    userId
+  );
+}
+
+async function getLocalChatMessages(userId: string) {
+  const database = await getDatabase();
+
+  return database.getAllAsync<LocalChatMessageRecord>(
+    `
+      SELECT
+        id,
+        threadId,
+        userId,
+        role,
+        text,
+        imagePath,
+        createdAt,
+        COALESCE(NULLIF(updatedAt, ''), createdAt) AS updatedAt,
+        syncStatus,
+        remoteUpdatedAt
+      FROM chat_messages
+      WHERE userId = ?
+      ORDER BY createdAt ASC
+    `,
+    userId
+  );
+}
+
 async function setLastSyncAt(userId: string, value: string) {
   await AsyncStorage.setItem(getLastSyncStorageKey(userId), value);
 }
@@ -350,6 +570,10 @@ export async function bindAnonymousDataToUser(userId: string) {
     SET userId = '${userId}', syncStatus = 'pending', remoteUpdatedAt = NULL
     WHERE userId IS NULL OR userId = '';
 
+    UPDATE plant_ai_analyses
+    SET userId = '${userId}', syncStatus = 'synced', remoteUpdatedAt = COALESCE(remoteUpdatedAt, updatedAt)
+    WHERE userId IS NULL OR userId = '';
+
     UPDATE sync_deletions
     SET userId = '${userId}'
     WHERE userId IS NULL OR userId = '';
@@ -376,6 +600,9 @@ export async function clearLocalDataForSignOut() {
   await database.withTransactionAsync(async () => {
     await database.execAsync(`
       DELETE FROM sync_deletions;
+      DELETE FROM chat_messages;
+      DELETE FROM chat_threads;
+      DELETE FROM plant_ai_analyses;
       DELETE FROM care_logs;
       DELETE FROM care_tasks;
       DELETE FROM plants;
@@ -1162,6 +1389,375 @@ async function pullLogs(userId: string) {
   return pulled;
 }
 
+async function pullAiAnalyses(userId: string) {
+  const client = getSupabaseClient();
+  const database = await getDatabase();
+  const localAnalyses = await getLocalAiAnalyses(userId);
+  const localAnalysisMap = new Map(localAnalyses.map((analysis) => [analysis.id, analysis]));
+  const { data, error } = await client
+    .from('plant_ai_analyses')
+    .select('*')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: true });
+
+  if (error) {
+    if (isMissingAiAnalysesTableError(error)) {
+      console.warn(
+        '[sync] Таблица plant_ai_analyses ещё не создана в Supabase. Pull AI-анализов пропущен.'
+      );
+      return 0;
+    }
+
+    throw error;
+  }
+
+  const remoteAnalyses = (data ?? []) as RemoteAiAnalysisRow[];
+  let pulled = 0;
+
+  for (const remoteAnalysis of remoteAnalyses) {
+    const localAnalysis = localAnalysisMap.get(remoteAnalysis.id);
+
+    if (!localAnalysis) {
+      await database.runAsync(
+        `
+          INSERT INTO plant_ai_analyses (
+            id,
+            plantId,
+            userId,
+            photoPath,
+            modelName,
+            summary,
+            overallCondition,
+            urgency,
+            observedSigns,
+            possibleCauses,
+            wateringAdvice,
+            lightAdvice,
+            humidityAdvice,
+            recommendedActions,
+            confidenceNote,
+            rawJson,
+            createdAt,
+            updatedAt,
+            syncStatus,
+            remoteUpdatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        remoteAnalysis.id,
+        remoteAnalysis.plant_id,
+        userId,
+        remoteAnalysis.photo_path,
+        remoteAnalysis.model_name,
+        remoteAnalysis.summary,
+        remoteAnalysis.overall_condition,
+        remoteAnalysis.urgency,
+        serializeStringArray(remoteAnalysis.observed_signs),
+        serializeStringArray(remoteAnalysis.possible_causes),
+        remoteAnalysis.watering_advice,
+        remoteAnalysis.light_advice,
+        remoteAnalysis.humidity_advice,
+        serializeStringArray(remoteAnalysis.recommended_actions),
+        remoteAnalysis.confidence_note,
+        serializeRawJson(remoteAnalysis.raw_json),
+        remoteAnalysis.created_at,
+        remoteAnalysis.updated_at,
+        'synced',
+        remoteAnalysis.updated_at
+      );
+
+      pulled += 1;
+      continue;
+    }
+
+    if (
+      localAnalysis.remoteUpdatedAt === remoteAnalysis.updated_at &&
+      localAnalysis.syncStatus === 'synced'
+    ) {
+      continue;
+    }
+
+    if (
+      localAnalysis.syncStatus === 'pending' &&
+      !isRemoteNewer(remoteAnalysis.updated_at, localAnalysis.updatedAt)
+    ) {
+      continue;
+    }
+
+    await database.runAsync(
+      `
+        UPDATE plant_ai_analyses
+        SET
+          plantId = ?,
+          userId = ?,
+          photoPath = ?,
+          modelName = ?,
+          summary = ?,
+          overallCondition = ?,
+          urgency = ?,
+          observedSigns = ?,
+          possibleCauses = ?,
+          wateringAdvice = ?,
+          lightAdvice = ?,
+          humidityAdvice = ?,
+          recommendedActions = ?,
+          confidenceNote = ?,
+          rawJson = ?,
+          createdAt = ?,
+          updatedAt = ?,
+          syncStatus = 'synced',
+          remoteUpdatedAt = ?
+        WHERE id = ?
+      `,
+      remoteAnalysis.plant_id,
+      userId,
+      remoteAnalysis.photo_path,
+      remoteAnalysis.model_name,
+      remoteAnalysis.summary,
+      remoteAnalysis.overall_condition,
+      remoteAnalysis.urgency,
+      serializeStringArray(remoteAnalysis.observed_signs),
+      serializeStringArray(remoteAnalysis.possible_causes),
+      remoteAnalysis.watering_advice,
+      remoteAnalysis.light_advice,
+      remoteAnalysis.humidity_advice,
+      serializeStringArray(remoteAnalysis.recommended_actions),
+      remoteAnalysis.confidence_note,
+      serializeRawJson(remoteAnalysis.raw_json),
+      remoteAnalysis.created_at,
+      remoteAnalysis.updated_at,
+      remoteAnalysis.updated_at,
+      remoteAnalysis.id
+    );
+
+    pulled += 1;
+  }
+
+  const remoteIds = new Set(remoteAnalyses.map((item) => item.id));
+
+  for (const localAnalysis of localAnalyses) {
+    if (!remoteIds.has(localAnalysis.id) && localAnalysis.syncStatus === 'synced') {
+      await database.runAsync('DELETE FROM plant_ai_analyses WHERE id = ?', localAnalysis.id);
+      pulled += 1;
+    }
+  }
+
+  return pulled;
+}
+
+async function pullChatThreads(userId: string) {
+  const client = getSupabaseClient();
+  const database = await getDatabase();
+  const localThreads = await getLocalChatThreads(userId);
+  const localThreadMap = new Map(localThreads.map((thread) => [thread.id, thread]));
+  const { data, error } = await client
+    .from('chat_threads')
+    .select('*')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: true });
+
+  if (error) {
+    if (isMissingChatTableError(error, 'chat_threads')) {
+      console.warn('[sync] Таблица chat_threads ещё не создана в Supabase. Pull чатов пропущен.');
+      return 0;
+    }
+
+    throw error;
+  }
+
+  const remoteThreads = (data ?? []) as RemoteChatThreadRow[];
+  let pulled = 0;
+
+  for (const remoteThread of remoteThreads) {
+    const localThread = localThreadMap.get(remoteThread.id);
+
+    if (!localThread) {
+      await database.runAsync(
+        `
+          INSERT INTO chat_threads (
+            id,
+            userId,
+            plantId,
+            title,
+            createdAt,
+            updatedAt,
+            syncStatus,
+            remoteUpdatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        remoteThread.id,
+        userId,
+        remoteThread.plant_id,
+        remoteThread.title,
+        remoteThread.created_at,
+        remoteThread.updated_at,
+        'synced',
+        remoteThread.updated_at
+      );
+
+      pulled += 1;
+      continue;
+    }
+
+    if (localThread.remoteUpdatedAt === remoteThread.updated_at && localThread.syncStatus === 'synced') {
+      continue;
+    }
+
+    if (localThread.syncStatus === 'pending' && !isRemoteNewer(remoteThread.updated_at, localThread.updatedAt)) {
+      continue;
+    }
+
+    await database.runAsync(
+      `
+        UPDATE chat_threads
+        SET
+          userId = ?,
+          plantId = ?,
+          title = ?,
+          createdAt = ?,
+          updatedAt = ?,
+          syncStatus = 'synced',
+          remoteUpdatedAt = ?
+        WHERE id = ?
+      `,
+      userId,
+      remoteThread.plant_id,
+      remoteThread.title,
+      remoteThread.created_at,
+      remoteThread.updated_at,
+      remoteThread.updated_at,
+      remoteThread.id
+    );
+
+    pulled += 1;
+  }
+
+  const remoteIds = new Set(remoteThreads.map((item) => item.id));
+
+  for (const localThread of localThreads) {
+    if (!remoteIds.has(localThread.id) && localThread.syncStatus === 'synced') {
+      await database.runAsync('DELETE FROM chat_threads WHERE id = ?', localThread.id);
+      pulled += 1;
+    }
+  }
+
+  return pulled;
+}
+
+async function pullChatMessages(userId: string) {
+  const client = getSupabaseClient();
+  const database = await getDatabase();
+  const localMessages = await getLocalChatMessages(userId);
+  const localMessageMap = new Map(localMessages.map((message) => [message.id, message]));
+  const { data, error } = await client
+    .from('chat_messages')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    if (isMissingChatTableError(error, 'chat_messages')) {
+      console.warn(
+        '[sync] Таблица chat_messages ещё не создана в Supabase. Pull сообщений чата пропущен.'
+      );
+      return 0;
+    }
+
+    throw error;
+  }
+
+  const remoteMessages = (data ?? []) as RemoteChatMessageRow[];
+  let pulled = 0;
+
+  for (const remoteMessage of remoteMessages) {
+    const localMessage = localMessageMap.get(remoteMessage.id);
+
+    if (!localMessage) {
+      await database.runAsync(
+        `
+          INSERT INTO chat_messages (
+            id,
+            threadId,
+            userId,
+            role,
+            text,
+            imagePath,
+            createdAt,
+            updatedAt,
+            syncStatus,
+            remoteUpdatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        remoteMessage.id,
+        remoteMessage.thread_id,
+        userId,
+        remoteMessage.role,
+        remoteMessage.text,
+        remoteMessage.image_path,
+        remoteMessage.created_at,
+        remoteMessage.updated_at,
+        'synced',
+        remoteMessage.updated_at
+      );
+
+      pulled += 1;
+      continue;
+    }
+
+    if (
+      localMessage.remoteUpdatedAt === remoteMessage.updated_at &&
+      localMessage.syncStatus === 'synced'
+    ) {
+      continue;
+    }
+
+    if (
+      localMessage.syncStatus === 'pending' &&
+      !isRemoteNewer(remoteMessage.updated_at, localMessage.updatedAt)
+    ) {
+      continue;
+    }
+
+    await database.runAsync(
+      `
+        UPDATE chat_messages
+        SET
+          threadId = ?,
+          userId = ?,
+          role = ?,
+          text = ?,
+          imagePath = ?,
+          createdAt = ?,
+          updatedAt = ?,
+          syncStatus = 'synced',
+          remoteUpdatedAt = ?
+        WHERE id = ?
+      `,
+      remoteMessage.thread_id,
+      userId,
+      remoteMessage.role,
+      remoteMessage.text,
+      remoteMessage.image_path,
+      remoteMessage.created_at,
+      remoteMessage.updated_at,
+      remoteMessage.updated_at,
+      remoteMessage.id
+    );
+
+    pulled += 1;
+  }
+
+  const remoteIds = new Set(remoteMessages.map((item) => item.id));
+
+  for (const localMessage of localMessages) {
+    if (!remoteIds.has(localMessage.id) && localMessage.syncStatus === 'synced') {
+      await database.runAsync('DELETE FROM chat_messages WHERE id = ?', localMessage.id);
+      pulled += 1;
+    }
+  }
+
+  return pulled;
+}
+
 export async function syncAllForCurrentUser(): Promise<SyncResult> {
   await initializeDatabase();
 
@@ -1174,6 +1770,9 @@ export async function syncAllForCurrentUser(): Promise<SyncResult> {
   const pulledPlants = await pullPlants(userId);
   const pulledTasks = await pullTasks(userId);
   const pulledLogs = await pullLogs(userId);
+  const pulledAiAnalyses = await pullAiAnalyses(userId);
+  const pulledChatThreads = await pullChatThreads(userId);
+  const pulledChatMessages = await pullChatMessages(userId);
   const pulledSettings = await pullSettings(userId);
 
   await refreshAllPlantCareState();
@@ -1186,6 +1785,13 @@ export async function syncAllForCurrentUser(): Promise<SyncResult> {
   return {
     finishedAt,
     pushed: pushedDeletions + pushedSettings + pushedPlants + pushedTasks + pushedLogs,
-    pulled: pulledPlants + pulledTasks + pulledLogs + pulledSettings,
+    pulled:
+      pulledPlants +
+      pulledTasks +
+      pulledLogs +
+      pulledAiAnalyses +
+      pulledChatThreads +
+      pulledChatMessages +
+      pulledSettings,
   };
 }

@@ -1,3 +1,4 @@
+import type { AiOverallCondition, AiUrgency } from '@/types/ai-analysis';
 import { getCareTypeLabel } from '@/constants/careTypes';
 import { getRiskLevelLabel } from '@/constants/healthTags';
 import {
@@ -84,4 +85,28 @@ export function formatRiskLabel(level: RiskLevel) {
 
 export function formatCareType(type: CareTaskType) {
   return getCareTypeLabel(type);
+}
+
+export function formatAiOverallCondition(condition: AiOverallCondition) {
+  if (condition === 'healthy') {
+    return 'Состояние выглядит стабильным';
+  }
+
+  if (condition === 'at_risk') {
+    return 'Есть выраженные признаки риска';
+  }
+
+  return 'Есть признаки, требующие внимания';
+}
+
+export function formatAiUrgency(urgency: AiUrgency) {
+  if (urgency === 'high') {
+    return 'Высокая';
+  }
+
+  if (urgency === 'medium') {
+    return 'Средняя';
+  }
+
+  return 'Низкая';
 }

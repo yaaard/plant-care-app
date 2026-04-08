@@ -3,9 +3,11 @@ import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, type Href, useLocalSearchParams, useRouter } from 'expo-router';
 
+import { AiAnalysisCard } from '@/components/AiAnalysisCard';
 import { EmptyState } from '@/components/EmptyState';
 import { RecommendationCard } from '@/components/RecommendationCard';
 import { RiskBadge } from '@/components/RiskBadge';
+import { getLatestAiAnalysisByPlantId } from '@/lib/ai-analyses-repo';
 import { getPlantGuideEntryByName } from '@/constants/plantGuide';
 import { formatCareType } from '@/lib/formatters';
 import { getLogsByPlantId } from '@/lib/logs-repo';
@@ -14,6 +16,7 @@ import { buildPlantRecommendations } from '@/lib/recommendations';
 import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
 import { getTasksByPlantId } from '@/lib/tasks-repo';
 import { getErrorMessage } from '@/lib/validators';
+import type { PlantAiAnalysis } from '@/types/ai-analysis';
 import type { CareLog } from '@/types/log';
 import type { Plant } from '@/types/plant';
 import type { CareTask } from '@/types/task';
@@ -30,6 +33,7 @@ export default function PlantRecommendationsScreen() {
   const [plant, setPlant] = useState<Plant | null>(null);
   const [tasks, setTasks] = useState<CareTask[]>([]);
   const [logs, setLogs] = useState<CareLog[]>([]);
+  const [latestAiAnalysis, setLatestAiAnalysis] = useState<PlantAiAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -43,15 +47,17 @@ export default function PlantRecommendationsScreen() {
     setLoading(true);
 
     try {
-      const [nextPlant, nextTasks, nextLogs] = await Promise.all([
+      const [nextPlant, nextTasks, nextLogs, nextLatestAiAnalysis] = await Promise.all([
         getPlantById(plantId),
         getTasksByPlantId(plantId),
         getLogsByPlantId(plantId),
+        getLatestAiAnalysisByPlantId(plantId),
       ]);
 
       setPlant(nextPlant);
       setTasks(nextTasks);
       setLogs(nextLogs);
+      setLatestAiAnalysis(nextLatestAiAnalysis);
       setErrorMessage(null);
     } catch (error) {
       setErrorMessage(getErrorMessage(error, 'Не удалось загрузить рекомендации.'));
@@ -83,9 +89,10 @@ export default function PlantRecommendationsScreen() {
             logs,
             guideEntry,
             riskAssessment,
+            latestAiAnalysis,
           })
         : null,
-    [guideEntry, logs, plant, riskAssessment, tasks]
+    [guideEntry, latestAiAnalysis, logs, plant, riskAssessment, tasks]
   );
 
   if (loading && !plant) {
@@ -151,6 +158,7 @@ export default function PlantRecommendationsScreen() {
         <RecommendationCard content={recommendation.wateringAdvice} title="Полив" />
         <RecommendationCard content={recommendation.lightAdvice} title="Освещение" />
         <RecommendationCard content={recommendation.humidityAdvice} title="Влажность" />
+        {latestAiAnalysis ? <AiAnalysisCard analysis={latestAiAnalysis} defaultExpanded /> : null}
         <RecommendationCard
           items={recommendation.riskWarnings}
           title="Возможные риски"

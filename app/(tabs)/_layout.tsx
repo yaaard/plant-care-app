@@ -38,6 +38,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="assistant"
+        options={{
+          title: 'Помощник',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons color={color} name="chatbubbles-outline" size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="guide"
         options={{
           title: 'Справочник',
@@ -48,7 +57,9 @@ export default function TabLayout() {
         name="stats"
         options={{
           title: 'Статистика',
-          tabBarIcon: ({ color, size }) => <Ionicons color={color} name="stats-chart-outline" size={size} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons color={color} name="stats-chart-outline" size={size} />
+          ),
         }}
       />
       <Tabs.Screen

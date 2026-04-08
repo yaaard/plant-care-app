@@ -1,6 +1,7 @@
 import { CARE_TYPE_VALUES } from '@/constants/careTypes';
 import {
   BACKUP_SCHEMA_VERSION,
+  DEFAULT_AI_MODEL_NAME,
   DEFAULT_RISK_LEVEL,
   DEFAULT_SETTINGS,
 } from '@/constants/defaultValues';
@@ -12,7 +13,9 @@ import {
   type PlantFormValues,
   type PlantHealthFormValues,
 } from '@/types/plant';
+import type { PlantAiAnalysis } from '@/types/ai-analysis';
 import type { AppBackup } from '@/types/backup';
+import type { ChatMessage, ChatRole, ChatThread } from '@/types/chat';
 import type { AppSettings, SettingsFormValues } from '@/types/settings';
 import type { RiskLevel } from '@/types/risk';
 import type { CareTask } from '@/types/task';
@@ -56,6 +59,16 @@ function isRiskLevel(value: unknown): value is RiskLevel {
   return value === 'low' || value === 'medium' || value === 'high';
 }
 
+function isAiOverallCondition(
+  value: unknown
+): value is PlantAiAnalysis['overallCondition'] {
+  return value === 'healthy' || value === 'needs_attention' || value === 'at_risk';
+}
+
+function isAiUrgency(value: unknown): value is PlantAiAnalysis['urgency'] {
+  return value === 'low' || value === 'medium' || value === 'high';
+}
+
 function isDateOrNull(value: unknown): value is string | null {
   return value === null || (typeof value === 'string' && isValidDateString(value));
 }
@@ -81,6 +94,32 @@ function parseConditionTagsValue(value: unknown): string {
   }
 
   return '[]';
+}
+
+function parseStringArrayValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return Array.from(
+      new Set(
+        value
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => item.trim())
+          .filter(Boolean)
+      )
+    );
+  }
+
+  if (typeof value === 'string') {
+    try {
+      return parseStringArrayValue(JSON.parse(value));
+    } catch {
+      return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
 }
 
 export function normalizePlantFormValues(values: PlantFormValues): PlantFormValues {
@@ -244,6 +283,7 @@ function normalizeImportedPlants(value: unknown, errors: string[]) {
         name: item.name.trim(),
         species: item.species.trim(),
         photoUri: getOptionalNullableString(item.photoUri),
+        photoPath: getOptionalNullableString(item.photoPath),
         lastWateringDate,
         wateringIntervalDays,
         notes: getOptionalString(item.notes),
@@ -387,6 +427,223 @@ function normalizeImportedLogs(value: unknown, plantIds: Set<string>, errors: st
     .filter((item): item is CareLog => item !== null);
 }
 
+function normalizeImportedAiAnalyses(
+  value: unknown,
+  plantIds: Set<string>,
+  errors: string[]
+): PlantAiAnalysis[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    errors.push('В backup поле aiAnalyses должно быть массивом.');
+    return [];
+  }
+
+  const usedIds = new Set<string>();
+
+  return value
+    .map((item, index) => {
+      if (!isObject(item)) {
+        errors.push(`Некорректная запись AI-анализа #${index + 1}.`);
+        return null;
+      }
+
+      if (!isNonEmptyString(item.id) || !isNonEmptyString(item.plantId)) {
+        errors.push(`У AI-анализа #${index + 1} отсутствуют поля id или plantId.`);
+        return null;
+      }
+
+      if (!plantIds.has(item.plantId.trim())) {
+        errors.push(`AI-анализ "${item.id}" ссылается на неизвестное растение.`);
+        return null;
+      }
+
+      if (usedIds.has(item.id.trim())) {
+        errors.push(`В backup найден дубликат id AI-анализа "${item.id}".`);
+        return null;
+      }
+
+      usedIds.add(item.id.trim());
+
+      if (!isNonEmptyString(item.summary)) {
+        errors.push(`У AI-анализа "${item.id}" отсутствует summary.`);
+        return null;
+      }
+
+      const overallCondition = isAiOverallCondition(item.overallCondition)
+        ? item.overallCondition
+        : 'needs_attention';
+      const urgency = isAiUrgency(item.urgency) ? item.urgency : 'medium';
+      const createdAt = isNonEmptyString(item.createdAt)
+        ? item.createdAt
+        : new Date().toISOString();
+      const updatedAt = isNonEmptyString(item.updatedAt) ? item.updatedAt : createdAt;
+
+      return {
+        id: item.id.trim(),
+        plantId: item.plantId.trim(),
+        userId: getOptionalNullableString(item.userId),
+        photoPath: getOptionalNullableString(item.photoPath),
+        modelName: getOptionalString(item.modelName, DEFAULT_AI_MODEL_NAME),
+        summary: item.summary.trim(),
+        overallCondition,
+        urgency,
+        observedSigns: parseStringArrayValue(item.observedSigns),
+        possibleCauses: parseStringArrayValue(item.possibleCauses),
+        wateringAdvice: getOptionalString(item.wateringAdvice),
+        lightAdvice: getOptionalString(item.lightAdvice),
+        humidityAdvice: getOptionalString(item.humidityAdvice),
+        recommendedActions: parseStringArrayValue(item.recommendedActions),
+        confidenceNote: getOptionalString(item.confidenceNote),
+        rawJson: getOptionalString(item.rawJson, '{}'),
+        createdAt,
+        updatedAt,
+        syncStatus: 'synced' as const,
+        remoteUpdatedAt: updatedAt,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
+function normalizeImportedChatThreads(
+  value: unknown,
+  plantIds: Set<string>,
+  errors: string[]
+): ChatThread[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    errors.push('В backup поле chatThreads должно быть массивом.');
+    return [];
+  }
+
+  const usedIds = new Set<string>();
+
+  return value
+    .map((item, index) => {
+      if (!isObject(item)) {
+        errors.push(`Некорректная запись треда чата #${index + 1}.`);
+        return null;
+      }
+
+      if (!isNonEmptyString(item.id)) {
+        errors.push(`У треда чата #${index + 1} отсутствует id.`);
+        return null;
+      }
+
+      if (usedIds.has(item.id.trim())) {
+        errors.push(`В backup найден дубликат id треда "${item.id}".`);
+        return null;
+      }
+
+      const plantId = getOptionalNullableString(item.plantId);
+
+      if (plantId && !plantIds.has(plantId)) {
+        errors.push(`Тред чата "${item.id}" ссылается на неизвестное растение.`);
+        return null;
+      }
+
+      usedIds.add(item.id.trim());
+
+      const createdAt = isNonEmptyString(item.createdAt)
+        ? item.createdAt
+        : new Date().toISOString();
+      const updatedAt = isNonEmptyString(item.updatedAt) ? item.updatedAt : createdAt;
+
+      return {
+        id: item.id.trim(),
+        userId: getOptionalNullableString(item.userId),
+        plantId,
+        title: getOptionalNullableString(item.title),
+        createdAt,
+        updatedAt,
+        syncStatus: 'synced' as const,
+        remoteUpdatedAt: updatedAt,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
+function normalizeImportedChatMessages(
+  value: unknown,
+  threadIds: Set<string>,
+  errors: string[]
+): ChatMessage[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    errors.push('В backup поле chatMessages должно быть массивом.');
+    return [];
+  }
+
+  const usedIds = new Set<string>();
+
+  return value
+    .map((item, index) => {
+      if (!isObject(item)) {
+        errors.push(`Некорректная запись сообщения чата #${index + 1}.`);
+        return null;
+      }
+
+      if (!isNonEmptyString(item.id) || !isNonEmptyString(item.threadId)) {
+        errors.push(`У сообщения чата #${index + 1} отсутствует id или threadId.`);
+        return null;
+      }
+
+      if (!threadIds.has(item.threadId.trim())) {
+        errors.push(`Сообщение чата "${item.id}" ссылается на неизвестный тред.`);
+        return null;
+      }
+
+      if (usedIds.has(item.id.trim())) {
+        errors.push(`В backup найден дубликат id сообщения "${item.id}".`);
+        return null;
+      }
+
+      const role =
+        item.role === 'assistant' || item.role === 'system' || item.role === 'user'
+          ? (item.role as ChatRole)
+          : null;
+
+      if (!role) {
+        errors.push(`У сообщения "${item.id}" указан неподдерживаемый role.`);
+        return null;
+      }
+
+      if (!isNonEmptyString(item.text) && !isNonEmptyString(item.imagePath)) {
+        errors.push(`Сообщение "${item.id}" должно содержать текст или imagePath.`);
+        return null;
+      }
+
+      usedIds.add(item.id.trim());
+
+      const createdAt = isNonEmptyString(item.createdAt)
+        ? item.createdAt
+        : new Date().toISOString();
+      const updatedAt = isNonEmptyString(item.updatedAt) ? item.updatedAt : createdAt;
+
+      return {
+        id: item.id.trim(),
+        threadId: item.threadId.trim(),
+        userId: getOptionalNullableString(item.userId),
+        role,
+        text: getOptionalString(item.text),
+        imagePath: getOptionalNullableString(item.imagePath),
+        createdAt,
+        updatedAt,
+        syncStatus: 'synced' as const,
+        remoteUpdatedAt: updatedAt,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
 export function parseBackupData(input: unknown): AppBackup {
   const errors: string[] = [];
 
@@ -405,6 +662,10 @@ export function parseBackupData(input: unknown): AppBackup {
   const plantIds = new Set(plants.map((plant) => plant.id));
   const careTasks = normalizeImportedTasks(input.careTasks, plantIds, errors);
   const careLogs = normalizeImportedLogs(input.careLogs, plantIds, errors);
+  const aiAnalyses = normalizeImportedAiAnalyses(input.aiAnalyses, plantIds, errors);
+  const chatThreads = normalizeImportedChatThreads(input.chatThreads, plantIds, errors);
+  const threadIds = new Set(chatThreads.map((thread) => thread.id));
+  const chatMessages = normalizeImportedChatMessages(input.chatMessages, threadIds, errors);
   const settings = normalizeImportedSettings(input.settings, errors);
 
   if (errors.length > 0) {
@@ -422,6 +683,9 @@ export function parseBackupData(input: unknown): AppBackup {
     plants,
     careTasks,
     careLogs,
+    aiAnalyses,
+    chatThreads,
+    chatMessages,
     settings,
   };
 }

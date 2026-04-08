@@ -19,6 +19,10 @@ export function buildPlantPhotoPath(userId: string, plantId: string) {
   return `${userId}/${plantId}/plant-photo`;
 }
 
+export function buildAssistantImagePath(userId: string, threadId: string, assetId: string) {
+  return `${userId}/assistant/${threadId}/${assetId}`;
+}
+
 export function getPlantPhotoPublicUrl(photoPath: string | null | undefined) {
   if (!photoPath) {
     return null;
@@ -53,6 +57,45 @@ export async function uploadPlantPhoto(input: {
 
   if (error) {
     console.warn('[storage] Не удалось загрузить фото растения в Supabase Storage.', {
+      photoPath,
+      localUri: input.localUri,
+      message: error.message,
+    });
+    throw error;
+  }
+
+  return {
+    photoPath,
+    photoUrl: getPlantPhotoPublicUrl(photoPath),
+  };
+}
+
+export async function uploadAssistantImage(input: {
+  userId: string;
+  threadId: string;
+  localUri: string;
+}) {
+  const client = getSupabaseClient();
+  const response = await fetch(input.localUri);
+
+  if (!response.ok) {
+    throw new Error(`Не удалось прочитать изображение перед загрузкой: ${response.status}`);
+  }
+
+  const buffer = await response.arrayBuffer();
+  const photoPath = buildAssistantImagePath(
+    input.userId,
+    input.threadId,
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+
+  const { error } = await client.storage.from(PLANT_PHOTO_BUCKET).upload(photoPath, buffer, {
+    contentType: guessContentType(input.localUri),
+    upsert: false,
+  });
+
+  if (error) {
+    console.warn('[storage] Не удалось загрузить изображение для чата.', {
       photoPath,
       localUri: input.localUri,
       message: error.message,

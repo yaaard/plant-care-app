@@ -5,6 +5,8 @@ import * as Sharing from 'expo-sharing';
 import Constants from 'expo-constants';
 
 import { BACKUP_DIRECTORY_NAME, BACKUP_SCHEMA_VERSION, DEFAULT_SETTINGS } from '@/constants/defaultValues';
+import { getAllAiAnalyses } from '@/lib/ai-analyses-repo';
+import { getAllChatMessages, getAllChatThreads } from '@/lib/chat-repo';
 import { getDatabase } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
 import { emitLocalDataChanged } from '@/lib/local-events';
@@ -24,6 +26,7 @@ const PLANT_COLUMNS = `
   name,
   species,
   photoUri,
+  photoPath,
   lastWateringDate,
   wateringIntervalDays,
   notes,
@@ -63,7 +66,8 @@ async function collectBackupData(): Promise<AppBackup> {
   await initializeDatabase();
   const database = await getDatabase();
 
-  const [plants, careTasks, careLogs, settings] = await Promise.all([
+  const [plants, careTasks, careLogs, aiAnalyses, chatThreads, chatMessages, settings] =
+    await Promise.all([
     database.getAllAsync<Plant>(
       `
         SELECT ${PLANT_COLUMNS}
@@ -85,6 +89,9 @@ async function collectBackupData(): Promise<AppBackup> {
         ORDER BY createdAt ASC
       `
     ),
+    getAllAiAnalyses(database),
+    getAllChatThreads(),
+    getAllChatMessages(),
     database.getFirstAsync<AppSettings>(
       `
         SELECT id, notificationsEnabled, notificationHour, notificationMinute
@@ -103,6 +110,9 @@ async function collectBackupData(): Promise<AppBackup> {
     plants,
     careTasks,
     careLogs,
+    aiAnalyses,
+    chatThreads,
+    chatMessages,
     settings: settings ?? DEFAULT_SETTINGS,
   };
 }
@@ -182,6 +192,9 @@ export async function pickBackupFileAsync(): Promise<ParsedBackupFile | null> {
 async function clearDatabaseTables(database: Awaited<ReturnType<typeof getDatabase>>) {
   await database.execAsync(`
     DELETE FROM sync_deletions;
+    DELETE FROM chat_messages;
+    DELETE FROM chat_threads;
+    DELETE FROM plant_ai_analyses;
     DELETE FROM care_logs;
     DELETE FROM care_tasks;
     DELETE FROM plants;
@@ -206,6 +219,7 @@ export async function restoreBackupAsync(backup: AppBackup): Promise<void> {
             name,
             species,
             photoUri,
+            photoPath,
             lastWateringDate,
             wateringIntervalDays,
             notes,
@@ -224,6 +238,7 @@ export async function restoreBackupAsync(backup: AppBackup): Promise<void> {
         plant.name,
         plant.species,
         plant.photoUri,
+        plant.photoPath ?? null,
         plant.lastWateringDate,
         plant.wateringIntervalDays,
         plant.notes,
@@ -280,6 +295,109 @@ export async function restoreBackupAsync(backup: AppBackup): Promise<void> {
         log.actionDate,
         log.comment,
         log.createdAt
+      );
+    }
+
+    for (const analysis of backup.aiAnalyses) {
+      await database.runAsync(
+        `
+          INSERT INTO plant_ai_analyses (
+            id,
+            plantId,
+            userId,
+            photoPath,
+            modelName,
+            summary,
+            overallCondition,
+            urgency,
+            observedSigns,
+            possibleCauses,
+            wateringAdvice,
+            lightAdvice,
+            humidityAdvice,
+            recommendedActions,
+            confidenceNote,
+            rawJson,
+            createdAt,
+            updatedAt,
+            syncStatus,
+            remoteUpdatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        analysis.id,
+        analysis.plantId,
+        analysis.userId ?? null,
+        analysis.photoPath ?? null,
+        analysis.modelName,
+        analysis.summary,
+        analysis.overallCondition,
+        analysis.urgency,
+        JSON.stringify(analysis.observedSigns),
+        JSON.stringify(analysis.possibleCauses),
+        analysis.wateringAdvice,
+        analysis.lightAdvice,
+        analysis.humidityAdvice,
+        JSON.stringify(analysis.recommendedActions),
+        analysis.confidenceNote,
+        analysis.rawJson,
+        analysis.createdAt,
+        analysis.updatedAt,
+        analysis.syncStatus ?? 'synced',
+        analysis.remoteUpdatedAt ?? analysis.updatedAt
+      );
+    }
+
+    for (const thread of backup.chatThreads) {
+      await database.runAsync(
+        `
+          INSERT INTO chat_threads (
+            id,
+            userId,
+            plantId,
+            title,
+            createdAt,
+            updatedAt,
+            syncStatus,
+            remoteUpdatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        thread.id,
+        thread.userId ?? null,
+        thread.plantId ?? null,
+        thread.title ?? null,
+        thread.createdAt,
+        thread.updatedAt,
+        thread.syncStatus ?? 'synced',
+        thread.remoteUpdatedAt ?? thread.updatedAt
+      );
+    }
+
+    for (const message of backup.chatMessages) {
+      await database.runAsync(
+        `
+          INSERT INTO chat_messages (
+            id,
+            threadId,
+            userId,
+            role,
+            text,
+            imagePath,
+            createdAt,
+            updatedAt,
+            syncStatus,
+            remoteUpdatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        message.id,
+        message.threadId,
+        message.userId ?? null,
+        message.role,
+        message.text,
+        message.imagePath ?? null,
+        message.createdAt,
+        message.updatedAt,
+        message.syncStatus ?? 'synced',
+        message.remoteUpdatedAt ?? message.updatedAt
       );
     }
 

@@ -8,7 +8,10 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/hooks/useAuth';
 import { initializeDatabase } from '@/lib/db-init';
-import { configureNotificationHandler, refreshScheduledNotificationsAsync } from '@/lib/notifications';
+import {
+  configureNotificationHandler,
+  refreshScheduledNotificationsAsync,
+} from '@/lib/notifications';
 import { refreshAllPlantCareState } from '@/lib/plants-repo';
 import { getErrorMessage } from '@/lib/validators';
 import { AuthProvider } from '@/providers/AuthProvider';
@@ -55,14 +58,19 @@ function RouteGuard() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="plant/add" options={{ title: 'Добавить растение' }} />
       <Stack.Screen name="plant/[id]" options={{ title: 'Карточка растения' }} />
+      <Stack.Screen name="plant/chat/[id]" options={{ title: 'Помощник по растению' }} />
       <Stack.Screen name="plant/edit/[id]" options={{ title: 'Редактировать растение' }} />
+      <Stack.Screen name="plant/analysis/[id]" options={{ title: 'AI-анализ фото' }} />
       <Stack.Screen
         name="plant/recommendations/[id]"
         options={{ title: 'Рекомендации по уходу' }}
       />
       <Stack.Screen name="plant/health/[id]" options={{ title: 'Состояние растения' }} />
       <Stack.Screen name="task/[id]" options={{ title: 'Задача' }} />
-      <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Информация' }} />
+      <Stack.Screen
+        name="modal"
+        options={{ presentation: 'modal', title: 'Информация' }}
+      />
     </Stack>
   );
 }

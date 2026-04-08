@@ -23,7 +23,15 @@ import { RiskBadge } from '@/components/RiskBadge';
 import { SectionTitle } from '@/components/SectionTitle';
 import { getHealthTagLabel } from '@/constants/healthTags';
 import { getPlantGuideEntryByName } from '@/constants/plantGuide';
-import { formatCareType, formatDateTime, formatDisplayDate, formatTaskDate } from '@/lib/formatters';
+import { getLatestAiAnalysisByPlantId } from '@/lib/ai-analyses-repo';
+import {
+  formatAiOverallCondition,
+  formatAiUrgency,
+  formatCareType,
+  formatDateTime,
+  formatDisplayDate,
+  formatTaskDate,
+} from '@/lib/formatters';
 import { getNextWateringDate } from '@/lib/date';
 import { getLogsByPlantId } from '@/lib/logs-repo';
 import { completePlantTask, deletePlant, getPlantById, markPlantAsWatered } from '@/lib/plants-repo';
@@ -31,6 +39,7 @@ import { buildPlantRecommendations } from '@/lib/recommendations';
 import { buildPlantRiskAssessment } from '@/lib/risk-assessment';
 import { getTasksByPlantId } from '@/lib/tasks-repo';
 import { getErrorMessage } from '@/lib/validators';
+import type { PlantAiAnalysis } from '@/types/ai-analysis';
 import type { CareLog } from '@/types/log';
 import { parseConditionTags, type Plant } from '@/types/plant';
 import type { CareTask } from '@/types/task';
@@ -55,6 +64,7 @@ export default function PlantDetailsScreen() {
   const [plant, setPlant] = useState<Plant | null>(null);
   const [tasks, setTasks] = useState<CareTask[]>([]);
   const [logs, setLogs] = useState<CareLog[]>([]);
+  const [latestAiAnalysis, setLatestAiAnalysis] = useState<PlantAiAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
@@ -70,15 +80,17 @@ export default function PlantDetailsScreen() {
     setLoading(true);
 
     try {
-      const [nextPlant, nextTasks, nextLogs] = await Promise.all([
+      const [nextPlant, nextTasks, nextLogs, nextLatestAiAnalysis] = await Promise.all([
         getPlantById(plantId),
         getTasksByPlantId(plantId),
         getLogsByPlantId(plantId),
+        getLatestAiAnalysisByPlantId(plantId),
       ]);
 
       setPlant(nextPlant);
       setTasks(nextTasks);
       setLogs(nextLogs);
+      setLatestAiAnalysis(nextLatestAiAnalysis);
       setErrorMessage(null);
     } catch (error) {
       setErrorMessage(getErrorMessage(error, 'Не удалось загрузить карточку растения.'));
@@ -177,9 +189,10 @@ export default function PlantDetailsScreen() {
             logs,
             guideEntry,
             riskAssessment,
+            latestAiAnalysis,
           })
         : null,
-    [guideEntry, logs, plant, riskAssessment, tasks]
+    [guideEntry, latestAiAnalysis, logs, plant, riskAssessment, tasks]
   );
   const activeTasks = useMemo(
     () => tasks.filter((task) => task.isCompleted === 0),
@@ -364,6 +377,75 @@ export default function PlantDetailsScreen() {
         </View>
 
         <View style={styles.card}>
+          <SectionTitle title="Последний AI-анализ" />
+
+          {latestAiAnalysis ? (
+            <>
+              <Text style={styles.summaryText}>{latestAiAnalysis.summary}</Text>
+              <Text style={styles.metaText}>
+                Выполнен: {formatDateTime(latestAiAnalysis.createdAt)}
+              </Text>
+
+              <View style={styles.tagWrap}>
+                <View style={styles.tag}>
+                  <Text style={styles.tagText}>
+                    {formatAiOverallCondition(latestAiAnalysis.overallCondition)}
+                  </Text>
+                </View>
+                <View style={styles.tag}>
+                  <Text style={styles.tagText}>
+                    Срочность: {formatAiUrgency(latestAiAnalysis.urgency)}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={styles.sectionLabel}>Главные действия</Text>
+              {latestAiAnalysis.recommendedActions.length > 0 ? (
+                renderPlainList(
+                  latestAiAnalysis.recommendedActions.slice(0, 2),
+                  styles.bodyText
+                )
+              ) : (
+                <Text style={styles.bodyText}>
+                  AI не выделил срочных действий по последнему фото.
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text style={styles.bodyText}>
+              История AI-анализов пока пуста. Можно запустить первый анализ по фотографии
+              растения.
+            </Text>
+          )}
+
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/plant/analysis/[id]',
+                params: { id: plant.id },
+              } as unknown as Href)
+            }
+            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.secondaryButtonText}>AI-анализ фото</Text>
+          </Pressable>
+
+          <View style={styles.buttonSpacer} />
+
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/plant/chat/[id]',
+                params: { id: plant.id },
+              } as unknown as Href)
+            }
+            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.secondaryButtonText}>Спросить помощника</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.card}>
           <SectionTitle title="Быстрые действия" />
 
           <Pressable
@@ -404,6 +486,34 @@ export default function PlantDetailsScreen() {
             style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
           >
             <Text style={styles.secondaryButtonText}>Рекомендации</Text>
+          </Pressable>
+
+          <View style={styles.buttonSpacer} />
+
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/plant/analysis/[id]',
+                params: { id: plant.id },
+              } as unknown as Href)
+            }
+            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.secondaryButtonText}>AI-анализ фото</Text>
+          </Pressable>
+
+          <View style={styles.buttonSpacer} />
+
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/plant/chat/[id]',
+                params: { id: plant.id },
+              } as unknown as Href)
+            }
+            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.secondaryButtonText}>Спросить помощника</Text>
           </Pressable>
         </View>
 
