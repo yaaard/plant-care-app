@@ -1,5 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
+import { AppTheme } from '@/constants/theme';
+
 type RecommendationCardProps = {
   title: string;
   content?: string;
@@ -40,34 +42,35 @@ export function RecommendationCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 18,
+    ...AppTheme.shadow.card,
+    backgroundColor: AppTheme.colors.surfaceElevated,
+    borderColor: AppTheme.colors.stroke,
+    borderRadius: AppTheme.radius.lg,
     borderWidth: 1,
     marginBottom: 12,
     padding: 16,
   },
   warningCard: {
-    backgroundColor: '#fff7f1',
-    borderColor: '#f3c2a2',
+    backgroundColor: AppTheme.colors.warningSoft,
+    borderColor: '#efd49c',
   },
   successCard: {
-    backgroundColor: '#f3faf4',
-    borderColor: '#cfe5d3',
+    backgroundColor: AppTheme.colors.successSoft,
+    borderColor: '#cfe5d7',
   },
   title: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
     marginBottom: 8,
   },
   content: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 14,
     lineHeight: 21,
   },
   item: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 14,
     lineHeight: 21,
     marginTop: 6,

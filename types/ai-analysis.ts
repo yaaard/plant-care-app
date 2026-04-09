@@ -1,4 +1,5 @@
 import type { SyncStatus } from '@/types/sync';
+import type { AiAction } from '@/types/ai-action';
 
 export type AiOverallCondition = 'healthy' | 'needs_attention' | 'at_risk';
 export type AiUrgency = 'low' | 'medium' | 'high';
@@ -13,6 +14,7 @@ export interface PlantAiAnalysisContent {
   lightAdvice: string;
   humidityAdvice: string;
   recommendedActions: string[];
+  actions: AiAction[];
   confidenceNote: string;
 }
 

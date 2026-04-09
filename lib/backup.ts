@@ -5,6 +5,7 @@ import * as Sharing from 'expo-sharing';
 import Constants from 'expo-constants';
 
 import { BACKUP_DIRECTORY_NAME, BACKUP_SCHEMA_VERSION, DEFAULT_SETTINGS } from '@/constants/defaultValues';
+import { getAllAiActionHistory } from '@/lib/ai-action-history-repo';
 import { getAllAiAnalyses } from '@/lib/ai-analyses-repo';
 import { getAllChatMessages, getAllChatThreads } from '@/lib/chat-repo';
 import { getDatabase } from '@/lib/db';
@@ -67,7 +68,7 @@ async function collectBackupData(): Promise<AppBackup> {
   await initializeDatabase();
   const database = await getDatabase();
 
-  const [plants, careTasks, careLogs, aiAnalyses, chatThreads, chatMessages, settings] =
+  const [plants, careTasks, careLogs, aiAnalyses, aiActionHistory, chatThreads, chatMessages, settings] =
     await Promise.all([
     database.getAllAsync<Plant>(
       `
@@ -91,6 +92,7 @@ async function collectBackupData(): Promise<AppBackup> {
       `
     ),
     getAllAiAnalyses(database),
+    getAllAiActionHistory(database),
     getAllChatThreads(),
     getAllChatMessages(),
     database.getFirstAsync<AppSettings>(
@@ -112,6 +114,7 @@ async function collectBackupData(): Promise<AppBackup> {
     careTasks,
     careLogs,
     aiAnalyses,
+    aiActionHistory,
     chatThreads,
     chatMessages,
     settings: settings ?? DEFAULT_SETTINGS,
@@ -193,6 +196,7 @@ export async function pickBackupFileAsync(): Promise<ParsedBackupFile | null> {
 async function clearDatabaseTables(database: Awaited<ReturnType<typeof getDatabase>>) {
   await database.execAsync(`
     DELETE FROM sync_deletions;
+    DELETE FROM ai_action_history;
     DELETE FROM chat_messages;
     DELETE FROM chat_threads;
     DELETE FROM plant_ai_analyses;
@@ -319,13 +323,14 @@ export async function restoreBackupAsync(backup: AppBackup): Promise<void> {
             lightAdvice,
             humidityAdvice,
             recommendedActions,
+            actions,
             confidenceNote,
             rawJson,
             createdAt,
             updatedAt,
             syncStatus,
             remoteUpdatedAt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         analysis.id,
         analysis.plantId,
@@ -341,12 +346,44 @@ export async function restoreBackupAsync(backup: AppBackup): Promise<void> {
         analysis.lightAdvice,
         analysis.humidityAdvice,
         JSON.stringify(analysis.recommendedActions),
+        JSON.stringify(analysis.actions),
         analysis.confidenceNote,
         analysis.rawJson,
         analysis.createdAt,
         analysis.updatedAt,
         analysis.syncStatus ?? 'synced',
         analysis.remoteUpdatedAt ?? analysis.updatedAt
+      );
+    }
+
+    for (const actionHistory of backup.aiActionHistory) {
+      await database.runAsync(
+        `
+          INSERT INTO ai_action_history (
+            id,
+            userId,
+            plantId,
+            analysisId,
+            chatMessageId,
+            actionType,
+            actionPayload,
+            appliedAt,
+            createdAt,
+            syncStatus,
+            remoteUpdatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        actionHistory.id,
+        actionHistory.userId ?? null,
+        actionHistory.plantId ?? null,
+        actionHistory.analysisId ?? null,
+        actionHistory.chatMessageId ?? null,
+        actionHistory.actionType,
+        actionHistory.actionPayload,
+        actionHistory.appliedAt,
+        actionHistory.createdAt,
+        actionHistory.syncStatus ?? 'synced',
+        actionHistory.remoteUpdatedAt ?? actionHistory.appliedAt
       );
     }
 
@@ -385,11 +422,12 @@ export async function restoreBackupAsync(backup: AppBackup): Promise<void> {
             role,
             text,
             imagePath,
+            actions,
             createdAt,
             updatedAt,
             syncStatus,
             remoteUpdatedAt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         message.id,
         message.threadId,
@@ -397,6 +435,7 @@ export async function restoreBackupAsync(backup: AppBackup): Promise<void> {
         message.role,
         message.text,
         message.imagePath ?? null,
+        JSON.stringify(message.actions),
         message.createdAt,
         message.updatedAt,
         message.syncStatus ?? 'synced',

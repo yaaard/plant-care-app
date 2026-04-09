@@ -1,10 +1,12 @@
 import { useDeferredValue, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 
 import { EmptyState } from '@/components/EmptyState';
 import { FilterChips, type FilterChipOption } from '@/components/FilterChips';
 import { SearchBar } from '@/components/SearchBar';
 import { SectionTitle } from '@/components/SectionTitle';
+import { SurfaceCard } from '@/components/ui/SurfaceCard';
+import { AppTheme } from '@/constants/theme';
 import { CARE_TYPE_VALUES, type CareType } from '@/constants/careTypes';
 import { useLogs } from '@/hooks/useLogs';
 import { formatCareType, formatDisplayDate } from '@/lib/formatters';
@@ -31,13 +33,9 @@ export default function HistoryScreen() {
     return logs.filter((log) => {
       const matchesQuery =
         !normalizedQuery ||
-        [log.plantName, log.plantSpecies, log.comment]
-          .join(' ')
-          .toLowerCase()
-          .includes(normalizedQuery);
+        [log.plantName, log.plantSpecies, log.comment].join(' ').toLowerCase().includes(normalizedQuery);
 
       const matchesType = filterKey === 'all' || log.actionType === filterKey;
-
       return matchesQuery && matchesType;
     });
   }, [deferredQuery, filterKey, logs]);
@@ -46,7 +44,7 @@ export default function HistoryScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.centered}>
-          <ActivityIndicator color="#2f6f3e" size="large" />
+          <ActivityIndicator color={AppTheme.colors.primary} size="large" />
           <Text style={styles.centeredText}>Загружаем журнал действий...</Text>
         </View>
       </SafeAreaView>
@@ -58,49 +56,61 @@ export default function HistoryScreen() {
       <FlatList
         contentContainerStyle={styles.listContent}
         data={visibleLogs}
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        keyboardShouldPersistTaps="handled"
         keyExtractor={(item) => item.id}
         ListEmptyComponent={
           <EmptyState
             description={
               logs.length === 0
-                ? 'После первых выполненных действий здесь появится локальная история ухода по всем растениям.'
-                : 'Попробуйте изменить поиск или фильтр по типу действия.'
+                ? 'После первых выполненных действий здесь появится история ухода.'
+                : 'Попробуйте изменить поиск или фильтр.'
             }
-            title={logs.length === 0 ? 'Журнал пока пуст' : 'По вашему запросу ничего не найдено'}
+            title={logs.length === 0 ? 'Журнал пока пуст' : 'Ничего не найдено'}
           />
         }
         ListHeaderComponent={
           <View style={styles.header}>
-            <SectionTitle title="История ухода" />
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>Журнал ухода</Text>
+              <Text style={styles.subtitle}>{visibleLogs.length} событий</Text>
+            </View>
 
-            <SearchBar
-              onChangeText={setSearchQuery}
-              placeholder="Поиск по растению или комментарию"
-              value={searchQuery}
-            />
-
-            <FilterChips
-              label="Тип действия"
-              onSelect={setFilterKey}
-              options={FILTER_OPTIONS}
-              selectedKey={filterKey}
-            />
-
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            <SurfaceCard compact style={styles.filterCard}>
+              <SectionTitle title="Найти событие" />
+              <SearchBar
+                onChangeText={setSearchQuery}
+                placeholder="Поиск по растению или комментарию"
+                value={searchQuery}
+              />
+              <FilterChips
+                label="Тип действия"
+                onSelect={setFilterKey}
+                options={FILTER_OPTIONS}
+                selectedKey={filterKey}
+              />
+              {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            </SurfaceCard>
           </View>
         }
         onRefresh={() => {
           void reload();
         }}
         refreshing={loading}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <Text style={styles.title}>{item.plantName}</Text>
-            <Text style={styles.subtitle}>
-              {formatCareType(item.actionType)} • {formatDisplayDate(item.actionDate)}
-            </Text>
-            <Text style={styles.species}>{item.plantSpecies}</Text>
-            {item.comment ? <Text style={styles.comment}>{item.comment}</Text> : null}
+        renderItem={({ item, index }) => (
+          <View style={styles.timelineRow}>
+            <View style={styles.timelineRail}>
+              <View style={styles.timelineDot} />
+              {index !== visibleLogs.length - 1 ? <View style={styles.timelineLine} /> : null}
+            </View>
+            <SurfaceCard compact style={styles.logCard}>
+              <Text style={styles.logTitle}>{item.plantName}</Text>
+              <Text style={styles.logMeta}>
+                {formatCareType(item.actionType)} • {formatDisplayDate(item.actionDate)}
+              </Text>
+              <Text style={styles.logSpecies}>{item.plantSpecies}</Text>
+              {item.comment ? <Text style={styles.logComment}>{item.comment}</Text> : null}
+            </SurfaceCard>
           </View>
         )}
         showsVerticalScrollIndicator={false}
@@ -111,50 +121,87 @@ export default function HistoryScreen() {
 
 const styles = StyleSheet.create({
   safeArea: {
-    backgroundColor: '#f6f7f2',
+    backgroundColor: AppTheme.colors.page,
     flex: 1,
   },
   listContent: {
-    padding: 16,
-    paddingBottom: 32,
+    padding: AppTheme.spacing.page,
+    paddingBottom: AppTheme.spacing.xxxl,
   },
   header: {
-    marginBottom: 8,
+    marginBottom: AppTheme.spacing.sm,
   },
-  card: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 18,
-    borderWidth: 1,
-    marginBottom: 12,
-    padding: 16,
+  titleRow: {
+    marginBottom: 14,
   },
   title: {
-    color: '#163020',
-    fontSize: 17,
-    fontWeight: '700',
-    marginBottom: 6,
+    color: AppTheme.colors.text,
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.8,
   },
   subtitle: {
-    color: '#435249',
+    color: AppTheme.colors.textMuted,
     fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
+    marginTop: 4,
   },
-  species: {
-    color: '#667085',
-    fontSize: 13,
-    marginBottom: 8,
-  },
-  comment: {
-    color: '#163020',
-    fontSize: 14,
-    lineHeight: 20,
+  filterCard: {
+    marginBottom: 10,
   },
   errorText: {
-    color: '#9a3412',
+    color: AppTheme.colors.danger,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  timelineRow: {
+    alignItems: 'stretch',
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  timelineRail: {
+    alignItems: 'center',
+    marginRight: 12,
+    width: 18,
+  },
+  timelineDot: {
+    backgroundColor: AppTheme.colors.primary,
+    borderRadius: 999,
+    height: 10,
+    marginTop: 16,
+    width: 10,
+  },
+  timelineLine: {
+    backgroundColor: AppTheme.colors.strokeStrong,
+    flex: 1,
+    marginTop: 6,
+    width: 2,
+  },
+  logCard: {
+    flex: 1,
+    marginBottom: 12,
+  },
+  logTitle: {
+    color: AppTheme.colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  logMeta: {
+    color: AppTheme.colors.primaryStrong,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  logSpecies: {
+    color: AppTheme.colors.textSoft,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  logComment: {
+    color: AppTheme.colors.text,
     fontSize: 14,
-    marginBottom: 8,
+    lineHeight: 20,
+    marginTop: 10,
   },
   centered: {
     alignItems: 'center',
@@ -163,7 +210,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   centeredText: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 15,
     marginTop: 12,
     textAlign: 'center',

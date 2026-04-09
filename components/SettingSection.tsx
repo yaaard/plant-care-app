@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { AppTheme } from '@/constants/theme';
+
 type SettingSectionProps = {
   title: string;
   description?: string;
@@ -16,7 +18,10 @@ export function SettingSection({
 }: SettingSectionProps) {
   return (
     <View style={[styles.card, tone === 'danger' && styles.dangerCard]}>
-      <Text style={[styles.title, tone === 'danger' && styles.dangerTitle]}>{title}</Text>
+      <View style={styles.header}>
+        <View style={[styles.accent, tone === 'danger' && styles.dangerAccent]} />
+        <Text style={[styles.title, tone === 'danger' && styles.dangerTitle]}>{title}</Text>
+      </View>
       {description ? <Text style={styles.description}>{description}</Text> : null}
       <View style={styles.content}>{children}</View>
     </View>
@@ -25,28 +30,43 @@ export function SettingSection({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 18,
+    ...AppTheme.shadow.card,
+    backgroundColor: AppTheme.colors.surfaceElevated,
+    borderColor: AppTheme.colors.stroke,
+    borderRadius: AppTheme.radius.xl,
     borderWidth: 1,
     marginBottom: 16,
-    padding: 16,
+    padding: 18,
   },
   dangerCard: {
-    backgroundColor: '#fff7f1',
-    borderColor: '#f3c2a2',
+    backgroundColor: AppTheme.colors.dangerSoft,
+    borderColor: '#f1c9c3',
   },
-  title: {
-    color: '#163020',
-    fontSize: 17,
-    fontWeight: '700',
+  header: {
+    alignItems: 'center',
+    flexDirection: 'row',
     marginBottom: 6,
   },
+  accent: {
+    backgroundColor: AppTheme.colors.primary,
+    borderRadius: AppTheme.radius.pill,
+    height: 14,
+    marginRight: 10,
+    width: 48,
+  },
+  dangerAccent: {
+    backgroundColor: AppTheme.colors.danger,
+  },
+  title: {
+    color: AppTheme.colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
   dangerTitle: {
-    color: '#c2410c',
+    color: AppTheme.colors.danger,
   },
   description: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
     lineHeight: 19,
   },

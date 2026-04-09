@@ -5,6 +5,7 @@ import {
   DEFAULT_RISK_LEVEL,
   DEFAULT_SETTINGS,
 } from '@/constants/defaultValues';
+import { normalizeAiActions } from '@/lib/ai-actions';
 import { isValidDateString } from '@/lib/date';
 import {
   normalizeConditionTags,
@@ -14,6 +15,7 @@ import {
   type PlantHealthFormValues,
 } from '@/types/plant';
 import type { PlantAiAnalysis } from '@/types/ai-analysis';
+import type { AiActionHistory } from '@/types/ai-action';
 import type { AppBackup } from '@/types/backup';
 import type { ChatMessage, ChatRole, ChatThread } from '@/types/chat';
 import type { AppSettings, SettingsFormValues } from '@/types/settings';
@@ -120,6 +122,13 @@ function parseStringArrayValue(value: unknown) {
   }
 
   return [];
+}
+
+function parseAiActionsValue(
+  value: unknown,
+  context: Parameters<typeof normalizeAiActions>[1] = {}
+) {
+  return normalizeAiActions(value, context);
 }
 
 export function normalizePlantFormValues(values: PlantFormValues): PlantFormValues {
@@ -498,6 +507,10 @@ function normalizeImportedAiAnalyses(
         lightAdvice: getOptionalString(item.lightAdvice),
         humidityAdvice: getOptionalString(item.humidityAdvice),
         recommendedActions: parseStringArrayValue(item.recommendedActions),
+        actions: parseAiActionsValue(item.actions, {
+          plantId: item.plantId.trim(),
+          createdAt,
+        }),
         confidenceNote: getOptionalString(item.confidenceNote),
         rawJson: getOptionalString(item.rawJson, '{}'),
         createdAt,
@@ -637,10 +650,91 @@ function normalizeImportedChatMessages(
         role,
         text: getOptionalString(item.text),
         imagePath: getOptionalNullableString(item.imagePath),
+        actions: parseAiActionsValue(item.actions, {
+          createdAt,
+        }),
         createdAt,
         updatedAt,
         syncStatus: 'synced' as const,
         remoteUpdatedAt: updatedAt,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
+function normalizeImportedAiActionHistory(
+  value: unknown,
+  plantIds: Set<string>,
+  analysisIds: Set<string>,
+  chatMessageIds: Set<string>,
+  errors: string[]
+): AiActionHistory[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    errors.push('В backup поле aiActionHistory должно быть массивом.');
+    return [];
+  }
+
+  const usedIds = new Set<string>();
+
+  return value
+    .map((item, index) => {
+      if (!isObject(item)) {
+        errors.push(`Некорректная запись истории AI-действий #${index + 1}.`);
+        return null;
+      }
+
+      if (!isNonEmptyString(item.id) || !isNonEmptyString(item.actionType)) {
+        errors.push(`У записи истории AI-действий #${index + 1} отсутствует id или actionType.`);
+        return null;
+      }
+
+      if (usedIds.has(item.id.trim())) {
+        errors.push(`В backup найден дубликат id истории AI-действия "${item.id}".`);
+        return null;
+      }
+
+      const plantId = getOptionalNullableString(item.plantId);
+      const analysisId = getOptionalNullableString(item.analysisId);
+      const chatMessageId = getOptionalNullableString(item.chatMessageId);
+
+      if (plantId && !plantIds.has(plantId)) {
+        errors.push(`История AI-действия "${item.id}" ссылается на неизвестное растение.`);
+        return null;
+      }
+
+      if (analysisId && !analysisIds.has(analysisId)) {
+        errors.push(`История AI-действия "${item.id}" ссылается на неизвестный анализ.`);
+        return null;
+      }
+
+      if (chatMessageId && !chatMessageIds.has(chatMessageId)) {
+        errors.push(`История AI-действия "${item.id}" ссылается на неизвестное сообщение чата.`);
+        return null;
+      }
+
+      usedIds.add(item.id.trim());
+
+      const appliedAt = isNonEmptyString(item.appliedAt)
+        ? item.appliedAt
+        : new Date().toISOString();
+      const createdAt = isNonEmptyString(item.createdAt) ? item.createdAt : appliedAt;
+
+      return {
+        id: item.id.trim(),
+        userId: getOptionalNullableString(item.userId),
+        plantId,
+        analysisId,
+        chatMessageId,
+        actionType: item.actionType as AiActionHistory['actionType'],
+        actionPayload: getOptionalString(item.actionPayload, '{}'),
+        appliedAt,
+        createdAt,
+        syncStatus: 'synced' as const,
+        remoteUpdatedAt: appliedAt,
       };
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
@@ -668,6 +762,15 @@ export function parseBackupData(input: unknown): AppBackup {
   const chatThreads = normalizeImportedChatThreads(input.chatThreads, plantIds, errors);
   const threadIds = new Set(chatThreads.map((thread) => thread.id));
   const chatMessages = normalizeImportedChatMessages(input.chatMessages, threadIds, errors);
+  const analysisIds = new Set(aiAnalyses.map((analysis) => analysis.id));
+  const chatMessageIds = new Set(chatMessages.map((message) => message.id));
+  const aiActionHistory = normalizeImportedAiActionHistory(
+    input.aiActionHistory,
+    plantIds,
+    analysisIds,
+    chatMessageIds,
+    errors
+  );
   const settings = normalizeImportedSettings(input.settings, errors);
 
   if (errors.length > 0) {
@@ -686,6 +789,7 @@ export function parseBackupData(input: unknown): AppBackup {
     careTasks,
     careLogs,
     aiAnalyses,
+    aiActionHistory,
     chatThreads,
     chatMessages,
     settings,

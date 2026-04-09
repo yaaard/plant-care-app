@@ -3,7 +3,12 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { getDatabase, nowIsoString } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
 
-type SyncableTable = 'plants' | 'care_tasks' | 'care_logs' | 'settings';
+type SyncableTable =
+  | 'plants'
+  | 'care_tasks'
+  | 'care_logs'
+  | 'settings'
+  | 'ai_action_history';
 
 async function resolveDatabase(database?: SQLiteDatabase) {
   if (database) {
@@ -80,7 +85,7 @@ export async function markRecordError(
 export async function countPendingChanges(userId: string, database?: SQLiteDatabase) {
   const activeDatabase = await resolveDatabase(database);
 
-  const [plants, tasks, logs, settings, deletions] = await Promise.all([
+  const [plants, tasks, logs, settings, aiActionHistory, deletions] = await Promise.all([
     activeDatabase.getFirstAsync<{ count: number }>(
       `SELECT COUNT(*) AS count FROM plants WHERE userId = ? AND syncStatus != 'synced'`,
       userId
@@ -98,6 +103,10 @@ export async function countPendingChanges(userId: string, database?: SQLiteDatab
       userId
     ),
     activeDatabase.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM ai_action_history WHERE userId = ? AND syncStatus != 'synced'`,
+      userId
+    ),
+    activeDatabase.getFirstAsync<{ count: number }>(
       `SELECT COUNT(*) AS count FROM sync_deletions WHERE userId = ? OR userId IS NULL`,
       userId
     ),
@@ -108,6 +117,7 @@ export async function countPendingChanges(userId: string, database?: SQLiteDatab
     (tasks?.count ?? 0) +
     (logs?.count ?? 0) +
     (settings?.count ?? 0) +
+    (aiActionHistory?.count ?? 0) +
     (deletions?.count ?? 0)
   );
 }

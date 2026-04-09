@@ -13,6 +13,7 @@ create table if not exists public.plant_ai_analyses (
   light_advice text not null default '',
   humidity_advice text not null default '',
   recommended_actions jsonb not null default '[]'::jsonb,
+  actions jsonb not null default '[]'::jsonb,
   confidence_note text not null default '',
   raw_json jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default timezone('utc', now()),
@@ -21,6 +22,9 @@ create table if not exists public.plant_ai_analyses (
 
 alter table public.plant_ai_analyses
 alter column model_name set default 'gemini-2.5-flash';
+
+alter table public.plant_ai_analyses
+add column if not exists actions jsonb not null default '[]'::jsonb;
 
 create index if not exists idx_plant_ai_analyses_user_id
 on public.plant_ai_analyses(user_id);

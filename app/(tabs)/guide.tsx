@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -10,17 +11,19 @@ import {
   View,
 } from 'react-native';
 import { type Href, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
 import { EmptyState } from '@/components/EmptyState';
+import { MetricTile } from '@/components/MetricTile';
+import { ScreenHero } from '@/components/ScreenHero';
 import { SearchBar } from '@/components/SearchBar';
-import { SectionTitle } from '@/components/SectionTitle';
+import { Button } from '@/components/ui/Button';
+import { SurfaceCard } from '@/components/ui/SurfaceCard';
+import { AppTheme } from '@/constants/theme';
 import { usePlantCatalog } from '@/hooks/usePlantCatalog';
 import { syncPlantCatalog } from '@/lib/plant-catalog-repo';
 import { getErrorMessage } from '@/lib/validators';
-import {
-  formatCatalogSummary,
-  formatCatalogTemperatureRange,
-} from '@/types/plant-catalog';
+import { formatCatalogTemperatureRange } from '@/types/plant-catalog';
 
 export default function GuideScreen() {
   const router = useRouter();
@@ -28,16 +31,19 @@ export default function GuideScreen() {
   const [syncing, setSyncing] = useState(false);
   const { plants, loading, error, reload } = usePlantCatalog(query);
 
+  const petSafeCount = plants.filter((plant) => plant.petSafe).length;
+  const hardCareCount = plants.filter((plant) => plant.difficultyLevel === 'сложный').length;
+
   const handleSyncCatalog = async () => {
     setSyncing(true);
 
     try {
       await syncPlantCatalog();
       await reload();
-    } catch (error) {
+    } catch (syncError) {
       Alert.alert(
         'Не удалось синхронизировать каталог',
-        getErrorMessage(error, 'Попробуйте повторить синхронизацию позже.')
+        getErrorMessage(syncError, 'Попробуйте повторить синхронизацию позже.')
       );
     } finally {
       setSyncing(false);
@@ -46,86 +52,117 @@ export default function GuideScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <SectionTitle title="Справочник растений" />
-        <Text style={styles.subtitle}>
-          Каталог используется как база типовых знаний для выбора вида, рекомендаций и AI-контекста.
-          После синхронизации он доступен и офлайн.
-        </Text>
-
-        <SearchBar
-          onChangeText={setQuery}
-          placeholder="Поиск по русскому или латинскому названию"
-          value={query}
-        />
-
-        {loading ? (
-          <View style={styles.centered}>
-            <ActivityIndicator color="#2f6f3e" size="large" />
-            <Text style={styles.centeredText}>Загружаем локальный каталог...</Text>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <ScreenHero
+          eyebrow="Plant Library"
+          sideContent={
+            <View style={styles.heroBadge}>
+              <Text style={styles.heroBadgeValue}>{plants.length}</Text>
+              <Text style={styles.heroBadgeLabel}>видов</Text>
+            </View>
+          }
+          title="Справочник растений"
+        >
+          <View style={styles.metricsRow}>
+            <MetricTile label="безопасны для животных" tone="primary" value={petSafeCount} />
+            <MetricTile label="сложные в уходе" tone="accent" value={hardCareCount} />
           </View>
-        ) : null}
+        </ScreenHero>
 
-        {!loading && error ? (
-          <EmptyState
-            actionLabel={syncing ? 'Синхронизация...' : 'Попробовать синхронизацию'}
-            description={error}
-            onActionPress={() => {
-              void handleSyncCatalog();
-            }}
-            title="Не удалось открыть справочник"
-          />
-        ) : null}
+        <SurfaceCard style={styles.explorerCard}>
+          <View style={styles.explorerTop}>
+            <Text style={styles.sectionTitle}>Каталог типового ухода</Text>
 
-        {!loading && !error && plants.length === 0 ? (
-          <EmptyState
-            actionLabel={syncing ? 'Синхронизация...' : 'Загрузить каталог'}
-            description={
-              query.trim()
-                ? 'По вашему запросу ничего не найдено.'
-                : 'Каталог пока пуст. После синхронизации он появится и будет доступен офлайн.'
-            }
-            onActionPress={() => {
-              if (!query.trim()) {
+            <Button
+              icon={<Ionicons color={AppTheme.colors.white} name="sync-outline" size={18} />}
+              label={syncing ? 'Синхронизация...' : 'Обновить'}
+              onPress={() => {
                 void handleSyncCatalog();
-              } else {
-                setQuery('');
-              }
-            }}
-            title={query.trim() ? 'Ничего не найдено' : 'Каталог ещё не загружен'}
+              }}
+            />
+          </View>
+
+          <SearchBar
+            onChangeText={setQuery}
+            placeholder="Поиск по русскому или латинскому названию"
+            value={query}
           />
-        ) : null}
 
-        {!loading && !error
-          ? plants.map((item) => (
-              <Pressable
-                key={item.id}
-                onPress={() =>
-                  router.push({
-                    pathname: '/catalog/[id]',
-                    params: { id: item.id },
-                  } as unknown as Href)
+          {loading ? (
+            <View style={styles.centered}>
+              <ActivityIndicator color={AppTheme.colors.primary} size="large" />
+              <Text style={styles.centeredText}>Загружаем каталог растений...</Text>
+            </View>
+          ) : null}
+
+          {!loading && error ? (
+            <EmptyState
+              actionLabel={syncing ? 'Синхронизация...' : 'Попробовать снова'}
+              description={error}
+              onActionPress={() => {
+                void handleSyncCatalog();
+              }}
+              title="Не удалось открыть каталог"
+            />
+          ) : null}
+
+          {!loading && !error && plants.length === 0 ? (
+            <EmptyState
+              actionLabel={query.trim() ? 'Сбросить поиск' : 'Загрузить каталог'}
+              description={
+                query.trim()
+                  ? 'По вашему запросу ничего не найдено.'
+                  : 'Каталог пока пуст.'
+              }
+              onActionPress={() => {
+                if (query.trim()) {
+                  setQuery('');
+                  return;
                 }
-                style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-              >
-                <Text style={styles.title}>{item.nameRu}</Text>
-                <Text style={styles.latinTitle}>{item.nameLatin}</Text>
-                <Text numberOfLines={3} style={styles.description}>
-                  {item.description}
-                </Text>
 
-                <View style={styles.metaWrap}>
-                  <Text style={styles.metaChip}>{item.difficultyLevel}</Text>
-                  <Text style={styles.metaChip}>{item.category}</Text>
-                </View>
+                void handleSyncCatalog();
+              }}
+              title={query.trim() ? 'Ничего не найдено' : 'Каталог еще не загружен'}
+            />
+          ) : null}
 
-                <Text style={styles.summary}>{formatCatalogSummary(item)}</Text>
-                <Text style={styles.summary}>
-                  Температура: {formatCatalogTemperatureRange(item)}
-                </Text>
-              </Pressable>
-            ))
-          : null}
+          {!loading && !error
+            ? plants.map((item) => (
+                <Pressable
+                  key={item.id}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/catalog/[id]',
+                      params: { id: item.id },
+                    } as unknown as Href)
+                  }
+                  style={({ pressed }) => [styles.catalogCard, pressed && styles.pressed]}
+                >
+                  <View style={styles.catalogHeader}>
+                    <View style={styles.catalogTitleWrap}>
+                      <Text style={styles.catalogTitle}>{item.nameRu}</Text>
+                      <Text style={styles.catalogLatin}>{item.nameLatin}</Text>
+                    </View>
+
+                    <View style={styles.catalogDifficultyBadge}>
+                      <Text style={styles.catalogDifficultyText}>{item.difficultyLevel}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.catalogMetaRow}>
+                    <Text style={styles.catalogMeta}>{item.category}</Text>
+                    <Text style={styles.catalogMeta}>{formatCatalogTemperatureRange(item)}</Text>
+                    <Text style={styles.catalogMeta}>{item.lightLevel}</Text>
+                  </View>
+                </Pressable>
+              ))
+            : null}
+        </SurfaceCard>
       </ScrollView>
     </SafeAreaView>
   );
@@ -133,18 +170,52 @@ export default function GuideScreen() {
 
 const styles = StyleSheet.create({
   safeArea: {
-    backgroundColor: '#f6f7f2',
+    backgroundColor: AppTheme.colors.page,
     flex: 1,
   },
   content: {
-    padding: 16,
-    paddingBottom: 32,
+    padding: AppTheme.spacing.page,
+    paddingBottom: AppTheme.spacing.xxxl,
   },
-  subtitle: {
-    color: '#667085',
-    fontSize: 14,
-    lineHeight: 21,
-    marginBottom: 16,
+  heroBadge: {
+    alignItems: 'center',
+    backgroundColor: AppTheme.colors.primarySoft,
+    borderRadius: 24,
+    minWidth: 92,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  heroBadgeValue: {
+    color: AppTheme.colors.primaryStrong,
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+  },
+  heroBadgeLabel: {
+    color: AppTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  explorerCard: {
+    marginBottom: 12,
+  },
+  explorerTop: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: AppTheme.spacing.md,
+    justifyContent: 'space-between',
+    marginBottom: AppTheme.spacing.md,
+  },
+  sectionTitle: {
+    color: AppTheme.colors.text,
+    flex: 1,
+    fontSize: 20,
+    fontWeight: '800',
+    lineHeight: 24,
   },
   centered: {
     alignItems: 'center',
@@ -152,59 +223,67 @@ const styles = StyleSheet.create({
     paddingVertical: 32,
   },
   centeredText: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 15,
     marginTop: 12,
     textAlign: 'center',
   },
-  card: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 18,
+  catalogCard: {
+    ...AppTheme.shadow.card,
+    backgroundColor: AppTheme.colors.surfaceSoft,
+    borderColor: AppTheme.colors.stroke,
+    borderRadius: 24,
     borderWidth: 1,
-    marginBottom: 12,
-    padding: 16,
+    marginTop: 12,
+    padding: AppTheme.spacing.md,
   },
-  title: {
-    color: '#163020',
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 2,
+  catalogHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
-  latinTitle: {
-    color: '#667085',
+  catalogTitleWrap: {
+    flex: 1,
+    marginRight: 12,
+  },
+  catalogTitle: {
+    color: AppTheme.colors.text,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  catalogLatin: {
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
-    marginBottom: 10,
+    marginTop: 3,
   },
-  description: {
-    color: '#163020',
-    fontSize: 14,
-    lineHeight: 21,
-    marginBottom: 12,
+  catalogDifficultyBadge: {
+    backgroundColor: AppTheme.colors.primarySoft,
+    borderRadius: AppTheme.radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
   },
-  metaWrap: {
+  catalogDifficultyText: {
+    color: AppTheme.colors.primaryStrong,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  catalogMetaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 10,
+    marginTop: 12,
   },
-  metaChip: {
-    backgroundColor: '#edf7ef',
-    borderRadius: 999,
-    color: '#2f6f3e',
+  catalogMeta: {
+    backgroundColor: AppTheme.colors.surfaceElevated,
+    borderRadius: AppTheme.radius.pill,
+    color: AppTheme.colors.textMuted,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     overflow: 'hidden',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  summary: {
-    color: '#667085',
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 4,
-  },
   pressed: {
-    opacity: 0.92,
+    opacity: 0.95,
   },
 });

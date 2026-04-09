@@ -3,6 +3,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { getDatabase } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
 import { emitLocalDataChanged } from '@/lib/local-events';
+import { parseAiActions, serializeAiActions } from '@/lib/ai-actions';
 import type { PlantAiAnalysis } from '@/types/ai-analysis';
 
 type AiAnalysisRecord = {
@@ -20,6 +21,7 @@ type AiAnalysisRecord = {
   lightAdvice: string;
   humidityAdvice: string;
   recommendedActions: string;
+  actions: string;
   confidenceNote: string;
   rawJson: string;
   createdAt: string;
@@ -43,6 +45,7 @@ const AI_ANALYSIS_SELECT_COLUMNS = `
   lightAdvice,
   humidityAdvice,
   recommendedActions,
+  actions,
   confidenceNote,
   rawJson,
   createdAt,
@@ -101,6 +104,10 @@ function mapAiAnalysisRecord(record: AiAnalysisRecord): PlantAiAnalysis {
     lightAdvice: record.lightAdvice,
     humidityAdvice: record.humidityAdvice,
     recommendedActions: parseStringArray(record.recommendedActions),
+    actions: parseAiActions(record.actions, {
+      plantId: record.plantId,
+      createdAt: record.createdAt,
+    }),
     confidenceNote: record.confidenceNote,
     rawJson: record.rawJson,
     createdAt: record.createdAt,
@@ -195,13 +202,14 @@ export async function upsertAiAnalysisLocally(
         lightAdvice,
         humidityAdvice,
         recommendedActions,
+        actions,
         confidenceNote,
         rawJson,
         createdAt,
         updatedAt,
         syncStatus,
         remoteUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         plantId = excluded.plantId,
         userId = excluded.userId,
@@ -216,6 +224,7 @@ export async function upsertAiAnalysisLocally(
         lightAdvice = excluded.lightAdvice,
         humidityAdvice = excluded.humidityAdvice,
         recommendedActions = excluded.recommendedActions,
+        actions = excluded.actions,
         confidenceNote = excluded.confidenceNote,
         rawJson = excluded.rawJson,
         createdAt = excluded.createdAt,
@@ -237,6 +246,7 @@ export async function upsertAiAnalysisLocally(
     analysis.lightAdvice,
     analysis.humidityAdvice,
     serializeStringArray(analysis.recommendedActions),
+    serializeAiActions(analysis.actions),
     analysis.confidenceNote,
     analysis.rawJson,
     analysis.createdAt,

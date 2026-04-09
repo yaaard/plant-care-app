@@ -1,5 +1,6 @@
 import type { PlantConditionTag } from '@/types/plant';
 import type { RiskLevel } from '@/types/risk';
+import { AppTheme } from '@/constants/theme';
 
 export const HEALTH_TAG_LABELS: Record<PlantConditionTag, string> = {
   healthy: 'Выглядит здоровым',
@@ -34,19 +35,19 @@ export const RISK_LEVEL_COLORS: Record<
   }
 > = {
   low: {
-    backgroundColor: '#edf7ef',
-    borderColor: '#cfe5d3',
-    textColor: '#2f6f3e',
+    backgroundColor: AppTheme.status.risk.low.background,
+    borderColor: AppTheme.status.risk.low.border,
+    textColor: AppTheme.status.risk.low.text,
   },
   medium: {
-    backgroundColor: '#fff7e6',
-    borderColor: '#f3d28e',
-    textColor: '#9a6700',
+    backgroundColor: AppTheme.status.risk.medium.background,
+    borderColor: AppTheme.status.risk.medium.border,
+    textColor: AppTheme.status.risk.medium.text,
   },
   high: {
-    backgroundColor: '#fff1e8',
-    borderColor: '#f3c2a2',
-    textColor: '#c2410c',
+    backgroundColor: AppTheme.status.risk.high.background,
+    borderColor: AppTheme.status.risk.high.border,
+    textColor: AppTheme.status.risk.high.text,
   },
 };
 

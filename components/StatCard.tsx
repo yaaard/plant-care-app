@@ -1,5 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
+import { AppTheme } from '@/constants/theme';
+
 type StatCardProps = {
   title: string;
   value: string | number;
@@ -18,25 +20,26 @@ export function StatCard({ title, value, subtitle }: StatCardProps) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 18,
+    ...AppTheme.shadow.card,
+    backgroundColor: AppTheme.colors.surface,
+    borderColor: AppTheme.colors.stroke,
+    borderRadius: AppTheme.radius.xl,
     borderWidth: 1,
     marginBottom: 12,
     padding: 16,
   },
   title: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
     marginBottom: 8,
   },
   value: {
-    color: '#163020',
-    fontSize: 26,
+    color: AppTheme.colors.text,
+    fontSize: 28,
     fontWeight: '700',
   },
   subtitle: {
-    color: '#435249',
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 8,

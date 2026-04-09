@@ -1,4 +1,7 @@
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import { AppTheme } from '@/constants/theme';
 
 type SearchBarProps = {
   value: string;
@@ -13,15 +16,27 @@ export function SearchBar({
 }: SearchBarProps) {
   return (
     <View style={styles.container}>
+      <View style={styles.iconWrap}>
+        <Ionicons color={AppTheme.colors.textSoft} name="search-outline" size={18} />
+      </View>
+
       <TextInput
+        autoCapitalize="none"
+        autoCorrect={false}
         onChangeText={onChangeText}
+        onSubmitEditing={Keyboard.dismiss}
         placeholder={placeholder}
-        placeholderTextColor="#8a948c"
+        placeholderTextColor={AppTheme.colors.textSoft}
+        returnKeyType="search"
         style={styles.input}
         value={value}
       />
+
       {value ? (
-        <Pressable onPress={() => onChangeText('')} style={({ pressed }) => [pressed && styles.pressed]}>
+        <Pressable
+          onPress={() => onChangeText('')}
+          style={({ pressed }) => [styles.clearButton, pressed && styles.pressed]}
+        >
           <Text style={styles.clearText}>Очистить</Text>
         </Pressable>
       ) : null}
@@ -32,25 +47,41 @@ export function SearchBar({
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 14,
+    backgroundColor: AppTheme.colors.surfaceElevated,
+    borderColor: AppTheme.colors.strokeStrong,
+    borderRadius: AppTheme.radius.xl,
     borderWidth: 1,
     flexDirection: 'row',
     marginBottom: 12,
-    paddingHorizontal: 14,
+    paddingHorizontal: 10,
+  },
+  iconWrap: {
+    alignItems: 'center',
+    backgroundColor: AppTheme.colors.surfaceSoft,
+    borderRadius: AppTheme.radius.md,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
   },
   input: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     flex: 1,
     fontSize: 15,
-    minHeight: 48,
+    minHeight: 52,
+    paddingLeft: 8,
+    paddingRight: 10,
+  },
+  clearButton: {
+    backgroundColor: AppTheme.colors.surfaceSoft,
+    borderRadius: AppTheme.radius.pill,
+    marginRight: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   clearText: {
-    color: '#2f6f3e',
-    fontSize: 13,
-    fontWeight: '600',
-    marginLeft: 12,
+    color: AppTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
   },
   pressed: {
     opacity: 0.85,

@@ -1,9 +1,7 @@
-export const AI_OVERALL_CONDITION_VALUES = [
-  'healthy',
-  'needs_attention',
-  'at_risk',
-] as const;
+import { AI_ACTION_JSON_SCHEMA, normalizeAiActionArray } from '@/shared/ai-action-schema';
+import type { AiAction } from '@/types/ai-action';
 
+export const AI_OVERALL_CONDITION_VALUES = ['healthy', 'needs_attention', 'at_risk'] as const;
 export const AI_URGENCY_VALUES = ['low', 'medium', 'high'] as const;
 
 export type PlantAiStructuredOverallCondition =
@@ -20,6 +18,7 @@ export interface PlantAiStructuredResult {
   light_advice: string;
   humidity_advice: string;
   recommended_actions: string[];
+  actions: AiAction[];
   confidence_note: string;
 }
 
@@ -40,7 +39,8 @@ function normalizeRequiredString(
 
 function normalizeStringArray(
   value: unknown,
-  fieldName: keyof PlantAiStructuredResult
+  fieldName: keyof PlantAiStructuredResult,
+  maxItems = 4
 ) {
   if (!Array.isArray(value)) {
     throw new Error(`Поле ${fieldName} должно быть массивом строк.`);
@@ -53,7 +53,7 @@ function normalizeStringArray(
         .map((item) => item.trim())
         .filter(Boolean)
     )
-  );
+  ).slice(0, maxItems);
 }
 
 function normalizeOverallCondition(value: unknown) {
@@ -85,69 +85,69 @@ export const PLANT_AI_ANALYSIS_JSON_SCHEMA = {
     'light_advice',
     'humidity_advice',
     'recommended_actions',
+    'actions',
     'confidence_note',
   ],
   properties: {
     summary: {
       type: 'string',
-      description:
-        'Короткий общий вывод по фото растения на русском языке. Умеренный и аккуратный.',
+      maxLength: 240,
     },
     overall_condition: {
       type: 'string',
       enum: [...AI_OVERALL_CONDITION_VALUES],
-      description:
-        'Общая оценка состояния растения: healthy, needs_attention или at_risk.',
     },
     urgency: {
       type: 'string',
       enum: [...AI_URGENCY_VALUES],
-      description: 'Срочность внимания: low, medium или high.',
     },
     observed_signs: {
       type: 'array',
+      maxItems: 4,
       items: {
         type: 'string',
+        maxLength: 80,
       },
-      description: 'Краткие признаки, которые можно предположить по фото.',
     },
     possible_causes: {
       type: 'array',
+      maxItems: 4,
       items: {
         type: 'string',
+        maxLength: 110,
       },
-      description:
-        'Мягко сформулированные возможные причины, без категоричных диагнозов.',
     },
     watering_advice: {
       type: 'string',
-      description: 'Совет по поливу на русском языке.',
+      maxLength: 200,
     },
     light_advice: {
       type: 'string',
-      description: 'Совет по освещению на русском языке.',
+      maxLength: 200,
     },
     humidity_advice: {
       type: 'string',
-      description: 'Совет по влажности на русском языке.',
+      maxLength: 200,
     },
     recommended_actions: {
       type: 'array',
+      maxItems: 4,
       items: {
         type: 'string',
+        maxLength: 110,
       },
-      description: 'Короткий список действий, которые стоит проверить или сделать.',
     },
+    actions: AI_ACTION_JSON_SCHEMA,
     confidence_note: {
       type: 'string',
-      description:
-        'Короткая пометка, что вывод носит вероятностный характер и основан только на фото.',
+      maxLength: 180,
     },
   },
 } as const;
 
 export function normalizePlantAiStructuredResult(
-  input: unknown
+  input: unknown,
+  context: Parameters<typeof normalizeAiActionArray>[1] = {}
 ): PlantAiStructuredResult {
   if (!isObject(input)) {
     throw new Error('AI-анализ вернулся в неподдерживаемом формате.');
@@ -159,22 +159,14 @@ export function normalizePlantAiStructuredResult(
     urgency: normalizeUrgency(input.urgency),
     observed_signs: normalizeStringArray(input.observed_signs, 'observed_signs'),
     possible_causes: normalizeStringArray(input.possible_causes, 'possible_causes'),
-    watering_advice: normalizeRequiredString(
-      input.watering_advice,
-      'watering_advice'
-    ),
+    watering_advice: normalizeRequiredString(input.watering_advice, 'watering_advice'),
     light_advice: normalizeRequiredString(input.light_advice, 'light_advice'),
-    humidity_advice: normalizeRequiredString(
-      input.humidity_advice,
-      'humidity_advice'
-    ),
+    humidity_advice: normalizeRequiredString(input.humidity_advice, 'humidity_advice'),
     recommended_actions: normalizeStringArray(
       input.recommended_actions,
       'recommended_actions'
     ),
-    confidence_note: normalizeRequiredString(
-      input.confidence_note,
-      'confidence_note'
-    ),
+    actions: normalizeAiActionArray(input.actions, context),
+    confidence_note: normalizeRequiredString(input.confidence_note, 'confidence_note'),
   };
 }

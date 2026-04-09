@@ -1,6 +1,16 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Stack, type Href, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { EmptyState } from '@/components/EmptyState';
@@ -127,64 +137,75 @@ export default function PlantHealthScreen() {
     <SafeAreaView style={styles.safeArea}>
       <Stack.Screen options={{ title: `Состояние: ${plant.name}` }} />
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.headerCard}>
-          <View style={styles.headerRow}>
-            <View style={styles.headerTextBlock}>
-              <Text style={styles.plantName}>{plant.name}</Text>
-              <Text style={styles.plantSpecies}>{plant.species}</Text>
-            </View>
-            <RiskBadge level={plant.riskLevel} />
-          </View>
-
-          <Text style={styles.headerText}>
-            Отметьте текущие симптомы и комментарий. После сохранения приложение пересчитает
-            уровень риска и обновит план ухода.
-          </Text>
-        </View>
-
-        <HealthTagSelector
-          helperText="Можно выбрать несколько признаков. Если растение выглядит хорошо, выберите «Выглядит здоровым»."
-          label="Симптомы и состояние"
-          onChange={setConditionTags}
-          selectedTags={conditionTags}
-        />
-
-        <FormField
-          label="Комментарий к осмотру"
-          multiline
-          onChangeText={setCustomCareComment}
-          placeholder="Например, листья стали мягче, растение стоит ближе к окну или недавно пересох грунт."
-          value={customCareComment}
-        />
-
-        {validationErrors.length > 0 ? (
-          <View style={styles.errorBox}>
-            {validationErrors.map((error) => (
-              <Text key={error} style={styles.errorText}>
-                • {error}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-
-        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-
-        <Pressable
-          disabled={saving}
-          onPress={() => {
-            void handleSave();
-          }}
-          style={({ pressed }) => [
-            styles.primaryButton,
-            (pressed || saving) && styles.pressed,
-          ]}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+        style={styles.flex}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.primaryButtonText}>
-            {saving ? 'Сохраняем...' : 'Сохранить состояние'}
-          </Text>
-        </Pressable>
-      </ScrollView>
+          <View style={styles.headerCard}>
+            <View style={styles.headerRow}>
+              <View style={styles.headerTextBlock}>
+                <Text style={styles.plantName}>{plant.name}</Text>
+                <Text style={styles.plantSpecies}>{plant.species}</Text>
+              </View>
+              <RiskBadge level={plant.riskLevel} />
+            </View>
+
+            <Text style={styles.headerText}>
+              Отметьте текущие симптомы и комментарий. После сохранения приложение пересчитает
+              уровень риска и обновит план ухода.
+            </Text>
+          </View>
+
+          <HealthTagSelector
+            helperText="Можно выбрать несколько признаков. Если растение выглядит хорошо, выберите «Выглядит здоровым»."
+            label="Симптомы и состояние"
+            onChange={setConditionTags}
+            selectedTags={conditionTags}
+          />
+
+          <FormField
+            label="Комментарий к осмотру"
+            multiline
+            onChangeText={setCustomCareComment}
+            placeholder="Например, листья стали мягче, растение стоит ближе к окну или недавно пересох грунт."
+            value={customCareComment}
+          />
+
+          {validationErrors.length > 0 ? (
+            <View style={styles.errorBox}>
+              {validationErrors.map((error) => (
+                <Text key={error} style={styles.errorText}>
+                  • {error}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+
+          {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+
+          <Pressable
+            disabled={saving}
+            onPress={() => {
+              void handleSave();
+            }}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              (pressed || saving) && styles.pressed,
+            ]}
+          >
+            <Text style={styles.primaryButtonText}>
+              {saving ? 'Сохраняем...' : 'Сохранить состояние'}
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -192,6 +213,9 @@ export default function PlantHealthScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: '#f6f7f2',
+    flex: 1,
+  },
+  flex: {
     flex: 1,
   },
   content: {

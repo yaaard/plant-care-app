@@ -29,7 +29,7 @@ import {
   type PlantHealthFormValues,
   type PlantListItem,
 } from '@/types/plant';
-import type { RiskAssessmentResult } from '@/types/risk';
+import type { RiskAssessmentResult, RiskLevel } from '@/types/risk';
 
 const PLANT_SELECT_COLUMNS = `
   id,
@@ -116,6 +116,25 @@ function buildPlantRecord(
     createdAt: seed.createdAt,
     updatedAt: seed.updatedAt,
   };
+}
+
+function getHigherRiskLevel(
+  currentRiskLevel: RiskLevel,
+  nextRiskLevel: RiskLevel | undefined
+): RiskLevel {
+  const riskOrder: Record<RiskLevel, number> = {
+    low: 1,
+    medium: 2,
+    high: 3,
+  };
+
+  if (!nextRiskLevel) {
+    return currentRiskLevel;
+  }
+
+  return riskOrder[nextRiskLevel] > riskOrder[currentRiskLevel]
+    ? nextRiskLevel
+    : currentRiskLevel;
 }
 
 async function syncPlantDerivedState(
@@ -384,6 +403,47 @@ export async function updatePlant(
   await refreshScheduledNotificationsAsync();
 
   return getPlantById(id);
+}
+
+export async function markPlantAttention(
+  plantId: string,
+  input: {
+    riskLevel?: RiskLevel;
+    note?: string | null;
+  } = {}
+): Promise<Plant | null> {
+  const database = await resolveDatabase();
+  const plant = await getPlantByIdInternal(plantId, database);
+
+  if (!plant) {
+    return null;
+  }
+
+  const nextComment = input.note?.trim() || plant.customCareComment;
+  const nextRiskLevel = getHigherRiskLevel(plant.riskLevel, input.riskLevel);
+  const timestamp = nowIsoString();
+
+  await database.runAsync(
+    `
+      UPDATE plants
+      SET
+        customCareComment = ?,
+        riskLevel = ?,
+        updatedAt = ?,
+        syncStatus = 'pending',
+        remoteUpdatedAt = NULL
+      WHERE id = ?
+    `,
+    nextComment,
+    nextRiskLevel,
+    timestamp,
+    plantId
+  );
+
+  emitLocalDataChanged();
+  await refreshScheduledNotificationsAsync();
+
+  return getPlantById(plantId);
 }
 
 export async function deletePlant(id: string): Promise<void> {

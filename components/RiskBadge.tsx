@@ -46,12 +46,13 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   compactBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
   },
   text: {
     fontSize: 13,
     fontWeight: '700',
+    letterSpacing: 0.1,
   },
   compactText: {
     fontSize: 12,

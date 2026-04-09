@@ -2,11 +2,16 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 
 import {
   buildGeminiImagePartFromUrl,
-  generateGeminiText,
+  generateGeminiJson,
   getGeminiModelName,
   type GeminiContent,
 } from '../_shared/gemini.ts';
 import { getBearerToken } from '../_shared/auth.ts';
+import {
+  ASSISTANT_CHAT_JSON_SCHEMA,
+  normalizeAssistantChatStructuredResult,
+} from '../_shared/assistant-chat-schema.ts';
+import { normalizeAiActionArray } from '../_shared/ai-action-schema.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,7 +20,10 @@ const corsHeaders = {
 };
 
 const STORAGE_BUCKET = 'plant-photos';
-const HISTORY_LIMIT = 12;
+const HISTORY_LIMIT = 8;
+const HISTORY_TEXT_LIMIT = 220;
+const CURRENT_TEXT_LIMIT = 500;
+const SYMPTOM_LIMIT = 3;
 
 type PlantRow = {
   id: string;
@@ -48,11 +56,6 @@ type CatalogRow = {
   temperature_max: number;
   care_tips: string;
   risk_notes: string;
-  soil_type: string;
-  fertilizing_info: string;
-  spraying_needed: boolean;
-  pet_safe: boolean;
-  difficulty_level: string;
 };
 
 type CatalogSymptomRow = {
@@ -77,6 +80,7 @@ type ChatMessageRow = {
   role: 'user' | 'assistant' | 'system';
   text: string;
   image_path: string | null;
+  actions: unknown[] | null;
   created_at: string;
   updated_at: string;
 };
@@ -106,6 +110,132 @@ function getUserIdFromClaims(
   return typeof claims?.sub === 'string' && claims.sub.trim() ? claims.sub.trim() : null;
 }
 
+function createActionId() {
+  return globalThis.crypto.randomUUID();
+}
+
+function trimText(value: string | null | undefined, maxLength: number) {
+  return (value ?? '').trim().replace(/\s+/g, ' ').slice(0, maxLength);
+}
+
+function compactText(label: string, value: string | null | undefined, maxLength = 120) {
+  const normalized = trimText(value, maxLength);
+  return normalized ? `${label}:${normalized}` : '';
+}
+
+function compactPlantContext(plant: PlantRow) {
+  return [
+    compactText('имя', plant.name, 60),
+    compactText('вид', plant.species, 80),
+    compactText('полив', `${plant.watering_interval_days}д;посл:${plant.last_watering_date ?? '-'}`, 60),
+    compactText('свет', plant.light_condition, 60),
+    compactText('влажн', plant.humidity_condition, 60),
+    compactText('темп', plant.room_temperature, 40),
+    compactText('риск', plant.risk_level, 20),
+    compactText('теги', plant.condition_tags, 80),
+    compactText('заметка', plant.custom_care_comment || plant.notes, 140),
+  ]
+    .filter(Boolean)
+    .join('; ');
+}
+
+function compactCatalogContext(catalogPlant: CatalogRow | null, symptoms: CatalogSymptomRow[]) {
+  if (!catalogPlant) {
+    return '';
+  }
+
+  const symptomSummary = symptoms
+    .slice(0, SYMPTOM_LIMIT)
+    .map((symptom) => {
+      const name = trimText(symptom.symptom_name_ru, 40);
+      const cause = trimText(symptom.possible_cause, 60);
+      const action = trimText(symptom.recommended_action, 70);
+      return [name, cause && `пр:${cause}`, action && `д:${action}`].filter(Boolean).join('|');
+    })
+    .join('; ');
+
+  return [
+    compactText('каталог', `${catalogPlant.name_ru}/${catalogPlant.name_latin}`, 90),
+    compactText('тип', catalogPlant.category, 40),
+    compactText(
+      'уход',
+      `${catalogPlant.watering_interval_min}-${catalogPlant.watering_interval_max}д;${catalogPlant.light_level};${catalogPlant.humidity_level};${catalogPlant.temperature_min}-${catalogPlant.temperature_max}C`,
+      110
+    ),
+    compactText('совет', catalogPlant.care_tips, 140),
+    compactText('риск', catalogPlant.risk_notes, 120),
+    compactText('симптомы', symptomSummary, 220),
+  ]
+    .filter(Boolean)
+    .join('; ');
+}
+
+function buildSystemInstruction(plant: PlantRow | null, catalogPlant: CatalogRow | null) {
+  const plantRule = plant
+    ? `plantId=${plant.id}`
+    : 'без plantId-зависимых actions';
+  const catalogRule = catalogPlant
+    ? `catalogPlantId=${catalogPlant.id}`
+    : 'без open_catalog_entry';
+
+  return [
+    'Ты помощник по комнатным растениям.',
+    'Отвечай по-русски.',
+    'Верни только JSON по схеме.',
+    'Коротко и по делу.',
+    'Без категоричных диагнозов.',
+    'Если данных мало, прямо скажи это.',
+    'actions только из списка: create_task, update_watering_interval, mark_attention, open_catalog_entry, open_plant_details, open_schedule, dismiss.',
+    'Не придумывай другие actions.',
+    'Не больше 3 actions.',
+    'Добавляй actions только если их реально можно полезно применить прямо сейчас.',
+    'Если полезного app-действия нет, верни пустой массив actions.',
+    'Для create_task используй только taskType: watering, spraying, fertilizing, repotting, inspection.',
+    'Для create_task в description кратко объясняй, зачем нужна эта задача именно сейчас.',
+    'Не используй расплывчатые названия вроде "Хорошо", "Сделать", "Совет".',
+    'Название и описание action должны быть конкретными и связанными с уходом.',
+    `Правила payload: ${plantRule}; ${catalogRule}.`,
+  ].join(' ');
+}
+
+function buildThreadTitle(input: {
+  plant: PlantRow | null;
+  text: string;
+  hasImage: boolean;
+}) {
+  if (input.plant) {
+    return `Помощник: ${input.plant.name}`;
+  }
+
+  const trimmed = trimText(input.text, 60);
+  if (trimmed) {
+    return trimmed;
+  }
+
+  return input.hasImage ? 'Диалог по фото растения' : 'Новый диалог';
+}
+
+function buildHistoryContents(messages: ChatMessageRow[]): GeminiContent[] {
+  return messages
+    .filter((message) => message.role === 'user' || message.role === 'assistant')
+    .map((message) => {
+      const text = trimText(message.text, HISTORY_TEXT_LIMIT);
+      const parts: { text: string }[] = [];
+
+      if (text) {
+        parts.push({ text });
+      } else if (message.image_path) {
+        parts.push({ text: 'Фото растения.' });
+      }
+
+      return {
+        role: message.role === 'assistant' ? 'model' : 'user',
+        parts,
+      } satisfies GeminiContent;
+    })
+    .filter((content) => content.parts.length > 0);
+}
+
 function normalizeThread(row: ChatThreadRow) {
   return {
     id: row.id,
@@ -119,7 +249,7 @@ function normalizeThread(row: ChatThreadRow) {
   };
 }
 
-function normalizeMessage(row: ChatMessageRow) {
+function normalizeMessage(row: ChatMessageRow, context: { plantId?: string | null; createdAt?: string }) {
   return {
     id: row.id,
     threadId: row.thread_id,
@@ -127,121 +257,16 @@ function normalizeMessage(row: ChatMessageRow) {
     role: row.role,
     text: row.text,
     imagePath: row.image_path,
+    actions: normalizeAiActionArray(row.actions ?? [], {
+      plantId: context.plantId,
+      createId: createActionId,
+      createdAt: context.createdAt ?? row.created_at,
+    }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     syncStatus: 'synced',
     remoteUpdatedAt: row.updated_at,
   };
-}
-
-function buildPlantContext(plant: PlantRow) {
-  return [
-    `Название: ${plant.name}`,
-    `Вид: ${plant.species}`,
-    `Последний полив: ${plant.last_watering_date ?? 'не указан'}`,
-    `Интервал полива: ${plant.watering_interval_days} дней`,
-    `Освещение: ${plant.light_condition || 'не указано'}`,
-    `Влажность: ${plant.humidity_condition || 'не указана'}`,
-    `Температура: ${plant.room_temperature || 'не указана'}`,
-    `Теги состояния: ${plant.condition_tags || '[]'}`,
-    `Уровень риска: ${plant.risk_level || 'не указан'}`,
-    `Заметки: ${plant.custom_care_comment || plant.notes || 'нет'}`,
-  ].join('\n');
-}
-
-function buildCatalogContext(
-  catalogPlant: CatalogRow | null,
-  symptoms: CatalogSymptomRow[]
-) {
-  if (!catalogPlant) {
-    return 'Справочный контекст по виду растения не найден.';
-  }
-
-  const symptomLines =
-    symptoms.length > 0
-      ? symptoms
-          .slice(0, 5)
-          .map(
-            (symptom) =>
-              `- ${symptom.symptom_name_ru}: причина — ${symptom.possible_cause}; действие — ${symptom.recommended_action}`
-          )
-          .join('\n')
-      : 'Нет типовых симптомов.';
-
-  return [
-    `Русское название: ${catalogPlant.name_ru}`,
-    `Латинское название: ${catalogPlant.name_latin}`,
-    `Категория: ${catalogPlant.category}`,
-    `Описание: ${catalogPlant.description}`,
-    `Типовой полив: примерно раз в ${catalogPlant.watering_interval_min}-${catalogPlant.watering_interval_max} дней`,
-    `Типовой свет: ${catalogPlant.light_level}`,
-    `Типовая влажность: ${catalogPlant.humidity_level}`,
-    `Типовая температура: ${catalogPlant.temperature_min}-${catalogPlant.temperature_max}°C`,
-    `Советы по уходу: ${catalogPlant.care_tips}`,
-    `Типичные риски: ${catalogPlant.risk_notes}`,
-    `Грунт: ${catalogPlant.soil_type}`,
-    `Подкормка: ${catalogPlant.fertilizing_info}`,
-    `Опрыскивание: ${catalogPlant.spraying_needed ? 'обычно полезно' : 'обычно не требуется'}`,
-    `Безопасно для животных: ${catalogPlant.pet_safe ? 'да' : 'нет'}`,
-    `Сложность ухода: ${catalogPlant.difficulty_level}`,
-    `Типовые симптомы:\n${symptomLines}`,
-  ].join('\n');
-}
-
-function buildSystemInstruction(
-  plant: PlantRow | null,
-  catalogPlant: CatalogRow | null,
-  catalogSymptoms: CatalogSymptomRow[]
-) {
-  return [
-    'Ты русскоязычный помощник по уходу за комнатными растениями.',
-    'Отвечай спокойно, понятно и по делу.',
-    'Не ставь категоричных диагнозов и не советуй сомнительные или опасные действия.',
-    'Если данных недостаточно, честно скажи об этом и попроси уточнение.',
-    'Если пользователь прислал фото, можешь учитывать визуальные признаки, но подчёркивай вероятностный характер вывода.',
-    plant ? `Контекст растения:\n${buildPlantContext(plant)}` : 'Контекст растения не задан.',
-    plant
-      ? `Справочный контекст вида:\n${buildCatalogContext(catalogPlant, catalogSymptoms)}`
-      : 'Справочный контекст вида отсутствует.',
-  ].join('\n\n');
-}
-
-function buildThreadTitle(input: {
-  plant: PlantRow | null;
-  text: string;
-  hasImage: boolean;
-}) {
-  if (input.plant) {
-    return `Помощник: ${input.plant.name}`;
-  }
-
-  const trimmed = input.text.trim();
-
-  if (trimmed) {
-    return trimmed.slice(0, 60);
-  }
-
-  return input.hasImage ? 'Диалог по фото растения' : 'Новый диалог';
-}
-
-function buildHistoryContents(messages: ChatMessageRow[]): GeminiContent[] {
-  return messages
-    .filter((message) => message.role === 'user' || message.role === 'assistant')
-    .map((message) => {
-      const parts: { text: string }[] = [];
-
-      if (message.text.trim()) {
-        parts.push({ text: message.text.trim() });
-      } else if (message.image_path) {
-        parts.push({ text: 'Пользователь прислал изображение растения без текста.' });
-      }
-
-      return {
-        role: message.role === 'assistant' ? 'model' : 'user',
-        parts,
-      } satisfies GeminiContent;
-    })
-    .filter((content) => content.parts.length > 0);
 }
 
 Deno.serve(async (request) => {
@@ -310,7 +335,7 @@ Deno.serve(async (request) => {
         : globalThis.crypto.randomUUID();
     const plantId =
       typeof body.plantId === 'string' && body.plantId.trim() ? body.plantId.trim() : null;
-    const userText = typeof body.text === 'string' ? body.text.trim() : '';
+    const userText = trimText(typeof body.text === 'string' ? body.text : '', CURRENT_TEXT_LIMIT);
     const imagePath =
       typeof body.imagePath === 'string' && body.imagePath.trim() ? body.imagePath.trim() : null;
 
@@ -362,7 +387,7 @@ Deno.serve(async (request) => {
 
       if (!nextPlant) {
         return jsonResponse(404, {
-          error: 'Растение для чата не найдено или доступ к нему запрещён.',
+          error: 'Растение для чата не найдено или доступ к нему запрещен.',
         });
       }
 
@@ -424,40 +449,37 @@ Deno.serve(async (request) => {
 
     if (plant?.catalog_plant_id) {
       stage = 'load_catalog';
-      const [{ data: nextCatalogPlant, error: catalogError }, { data: nextCatalogSymptoms, error: symptomsError }] =
-        await Promise.all([
-          supabase
-            .from('plant_catalog')
-            .select(
-              `
-                id,
-                name_ru,
-                name_latin,
-                category,
-                description,
-                watering_interval_min,
-                watering_interval_max,
-                light_level,
-                humidity_level,
-                temperature_min,
-                temperature_max,
-                care_tips,
-                risk_notes,
-                soil_type,
-                fertilizing_info,
-                spraying_needed,
-                pet_safe,
-                difficulty_level
-              `
-            )
-            .eq('id', plant.catalog_plant_id)
-            .maybeSingle<CatalogRow>(),
-          supabase
-            .from('plant_catalog_symptoms')
-            .select('symptom_name_ru, possible_cause, recommended_action')
-            .eq('plant_catalog_id', plant.catalog_plant_id)
-            .limit(5),
-        ]);
+      const [
+        { data: nextCatalogPlant, error: catalogError },
+        { data: nextCatalogSymptoms, error: symptomsError },
+      ] = await Promise.all([
+        supabase
+          .from('plant_catalog')
+          .select(
+            `
+              id,
+              name_ru,
+              name_latin,
+              category,
+              description,
+              watering_interval_min,
+              watering_interval_max,
+              light_level,
+              humidity_level,
+              temperature_min,
+              temperature_max,
+              care_tips,
+              risk_notes
+            `
+          )
+          .eq('id', plant.catalog_plant_id)
+          .maybeSingle<CatalogRow>(),
+        supabase
+          .from('plant_catalog_symptoms')
+          .select('symptom_name_ru, possible_cause, recommended_action')
+          .eq('plant_catalog_id', plant.catalog_plant_id)
+          .limit(SYMPTOM_LIMIT),
+      ]);
 
       if (!catalogError) {
         catalogPlant = nextCatalogPlant ?? null;
@@ -485,6 +507,17 @@ Deno.serve(async (request) => {
     const contents: GeminiContent[] = buildHistoryContents(orderedMessages);
     const currentParts: GeminiContent['parts'] = [];
 
+    const contextLines = [
+      compactText('растение', plant ? compactPlantContext(plant) : '', 240),
+      compactText('справочник', compactCatalogContext(catalogPlant, catalogSymptoms), 280),
+    ].filter(Boolean);
+
+    if (contextLines.length > 0) {
+      currentParts.push({
+        text: contextLines.join('\n'),
+      });
+    }
+
     if (userText) {
       currentParts.push({ text: userText });
     }
@@ -496,7 +529,7 @@ Deno.serve(async (request) => {
     }
 
     if (!currentParts.length) {
-      currentParts.push({ text: 'Пожалуйста, помоги разобраться с этим растением.' });
+      currentParts.push({ text: 'Помоги с этим растением.' });
     }
 
     contents.push({
@@ -505,16 +538,24 @@ Deno.serve(async (request) => {
     });
 
     stage = 'gemini';
-    const { text: assistantText, modelName } = await generateGeminiText({
+    const now = new Date().toISOString();
+    const { modelName, parsed } = await generateGeminiJson<unknown>({
       apiKey: geminiApiKey,
       model: getGeminiModelName(),
-      systemInstruction: buildSystemInstruction(plant, catalogPlant, catalogSymptoms),
+      systemInstruction: buildSystemInstruction(plant, catalogPlant),
       contents,
-      temperature: 0.4,
-      maxOutputTokens: 900,
+      responseJsonSchema: ASSISTANT_CHAT_JSON_SCHEMA as Record<string, unknown>,
+      temperature: 0.3,
+      maxOutputTokens: 650,
     });
 
-    const now = new Date().toISOString();
+    const structuredResult = normalizeAssistantChatStructuredResult(parsed, {
+      plantId: effectivePlantId,
+      catalogPlantId: plant?.catalog_plant_id ?? catalogPlant?.id ?? null,
+      createId: createActionId,
+      createdAt: now,
+    });
+
     const threadPayload = {
       id: threadId,
       user_id: userId,
@@ -549,6 +590,7 @@ Deno.serve(async (request) => {
       role: 'user' as const,
       text: userText,
       image_path: imagePath,
+      actions: [],
       created_at: now,
       updated_at: now,
     };
@@ -558,8 +600,9 @@ Deno.serve(async (request) => {
       thread_id: threadId,
       user_id: userId,
       role: 'assistant' as const,
-      text: assistantText,
+      text: structuredResult.reply,
       image_path: null,
+      actions: structuredResult.actions,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -590,7 +633,16 @@ Deno.serve(async (request) => {
         ...savedThread,
         updated_at: assistantMessageRow.updated_at,
       }),
-      messages: [normalizeMessage(userMessageRow), normalizeMessage(assistantMessageRow)],
+      messages: [
+        normalizeMessage(userMessageRow, {
+          plantId: effectivePlantId,
+          createdAt: userMessageRow.created_at,
+        }),
+        normalizeMessage(assistantMessageRow, {
+          plantId: effectivePlantId,
+          createdAt: assistantMessageRow.created_at,
+        }),
+      ],
     });
   } catch (error) {
     const errorMessage =

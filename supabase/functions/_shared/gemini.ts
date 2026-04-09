@@ -1,5 +1,9 @@
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const DEFAULT_TIMEOUT_MS = 45_000;
+const MAX_RETRY_ATTEMPTS = 3;
+const BASE_RETRY_DELAY_MS = 1_200;
+const MAX_RETRY_DELAY_MS = 8_000;
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 503, 504]);
 
 type GeminiTextPart = {
   text: string;
@@ -65,6 +69,38 @@ function stripJsonFence(value: string) {
   return trimmed.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryDelayMs(attempt: number, retryAfterHeader: string | null) {
+  const retryAfterSeconds = Number.parseFloat(retryAfterHeader ?? '');
+
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+    return Math.min(retryAfterSeconds * 1_000, MAX_RETRY_DELAY_MS);
+  }
+
+  const exponentialDelay = Math.min(
+    BASE_RETRY_DELAY_MS * 2 ** attempt,
+    MAX_RETRY_DELAY_MS
+  );
+  const jitter = Math.floor(Math.random() * 250);
+  return exponentialDelay + jitter;
+}
+
+function isLikelyTransientError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === 'AbortError' ||
+    error.message.includes('fetch failed') ||
+    error.message.includes('connection') ||
+    error.message.includes('network')
+  );
+}
+
 export function getGeminiModelName() {
   return Deno.env.get('GEMINI_MODEL') ?? DEFAULT_GEMINI_MODEL;
 }
@@ -94,45 +130,97 @@ async function fetchGemini(input: {
   body: Record<string, unknown>;
   timeoutMs?: number;
 }) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(
-    () => controller.abort(),
-    input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  );
+  let lastError: Error | null = null;
 
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${input.model}:generateContent`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': input.apiKey,
-        },
-        body: JSON.stringify(input.body),
-        signal: controller.signal,
-      }
+  for (let attempt = 0; attempt <= MAX_RETRY_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      input.timeoutMs ?? DEFAULT_TIMEOUT_MS
     );
 
-    const responseText = await response.text();
-
-    if (!response.ok) {
-      throw new Error(
-        `Gemini вернул ошибку ${response.status}: ${responseText || 'пустой ответ'}`
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${input.model}:generateContent`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': input.apiKey,
+          },
+          body: JSON.stringify(input.body),
+          signal: controller.signal,
+        }
       );
-    }
 
-    const parsed = JSON.parse(responseText) as Record<string, unknown>;
-    return parsed;
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Время ожидания ответа Gemini истекло. Попробуйте ещё раз.');
-    }
+      const responseText = await response.text();
 
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
+      if (!response.ok) {
+        const errorMessage = responseText || 'пустой ответ';
+
+        if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < MAX_RETRY_ATTEMPTS) {
+          const retryDelayMs = getRetryDelayMs(attempt, response.headers.get('retry-after'));
+
+          console.warn('gemini request retry', {
+            attempt: attempt + 1,
+            status: response.status,
+            delayMs: retryDelayMs,
+          });
+
+          lastError = new Error(`Gemini временно недоступен: ${response.status}.`);
+          await sleep(retryDelayMs);
+          continue;
+        }
+
+        if (response.status === 503) {
+          throw new Error(
+            'Gemini сейчас перегружен. Попробуйте повторить запрос через несколько секунд.'
+          );
+        }
+
+        throw new Error(`Gemini вернул ошибку ${response.status}: ${errorMessage}`);
+      }
+
+      return JSON.parse(responseText) as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        if (attempt < MAX_RETRY_ATTEMPTS) {
+          const retryDelayMs = getRetryDelayMs(attempt, null);
+
+          console.warn('gemini timeout retry', {
+            attempt: attempt + 1,
+            delayMs: retryDelayMs,
+          });
+
+          lastError = new Error('Время ожидания ответа Gemini истекло.');
+          await sleep(retryDelayMs);
+          continue;
+        }
+
+        throw new Error('Время ожидания ответа Gemini истекло. Попробуйте ещё раз.');
+      }
+
+      if (attempt < MAX_RETRY_ATTEMPTS && isLikelyTransientError(error)) {
+        const retryDelayMs = getRetryDelayMs(attempt, null);
+
+        console.warn('gemini transient retry', {
+          attempt: attempt + 1,
+          delayMs: retryDelayMs,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        lastError = error instanceof Error ? error : new Error(String(error));
+        await sleep(retryDelayMs);
+        continue;
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
+
+  throw lastError ?? new Error('Не удалось получить ответ Gemini после нескольких попыток.');
 }
 
 export async function generateGeminiJson<T>(input: {
@@ -142,6 +230,7 @@ export async function generateGeminiJson<T>(input: {
   contents: GeminiContent[];
   responseJsonSchema: Record<string, unknown>;
   temperature?: number;
+  maxOutputTokens?: number;
 }) {
   const model = input.model ?? getGeminiModelName();
   const rawPayload = await fetchGemini({
@@ -154,6 +243,7 @@ export async function generateGeminiJson<T>(input: {
       contents: input.contents,
       generationConfig: {
         temperature: input.temperature ?? 0.2,
+        maxOutputTokens: input.maxOutputTokens ?? 800,
         responseMimeType: 'application/json',
         responseJsonSchema: input.responseJsonSchema,
       },

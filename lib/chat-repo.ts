@@ -1,4 +1,5 @@
 import { emitLocalDataChanged } from '@/lib/local-events';
+import { parseAiActions, serializeAiActions } from '@/lib/ai-actions';
 import { getDatabase } from '@/lib/db';
 import type { ChatMessage, ChatRole, ChatThread, ChatThreadListItem } from '@/types/chat';
 
@@ -26,6 +27,7 @@ type ChatMessageRow = {
   role: string;
   text: string | null;
   imagePath: string | null;
+  actions: string | null;
   createdAt: string;
   updatedAt: string;
   syncStatus: string | null;
@@ -67,6 +69,9 @@ function mapChatMessage(row: ChatMessageRow): ChatMessage {
     role: normalizeChatRole(row.role),
     text: row.text ?? '',
     imagePath: row.imagePath,
+    actions: parseAiActions(row.actions, {
+      createdAt: row.createdAt,
+    }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     syncStatus: normalizeSyncStatus(row.syncStatus),
@@ -219,6 +224,7 @@ export async function getAllChatMessages() {
         role,
         text,
         imagePath,
+        actions,
         createdAt,
         updatedAt,
         syncStatus,
@@ -242,6 +248,7 @@ export async function getChatMessagesByThreadId(threadId: string) {
         role,
         text,
         imagePath,
+        actions,
         createdAt,
         updatedAt,
         syncStatus,
@@ -303,17 +310,19 @@ export async function upsertChatMessageLocally(message: ChatMessage) {
         role,
         text,
         imagePath,
+        actions,
         createdAt,
         updatedAt,
         syncStatus,
         remoteUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         threadId = excluded.threadId,
         userId = excluded.userId,
         role = excluded.role,
         text = excluded.text,
         imagePath = excluded.imagePath,
+        actions = excluded.actions,
         createdAt = excluded.createdAt,
         updatedAt = excluded.updatedAt,
         syncStatus = excluded.syncStatus,
@@ -325,6 +334,7 @@ export async function upsertChatMessageLocally(message: ChatMessage) {
     message.role,
     message.text,
     message.imagePath,
+    serializeAiActions(message.actions),
     message.createdAt,
     message.updatedAt,
     message.syncStatus ?? 'synced',

@@ -16,6 +16,7 @@ import { refreshAllPlantCareState } from '@/lib/plants-repo';
 import { getErrorMessage } from '@/lib/validators';
 import { AuthProvider } from '@/providers/AuthProvider';
 import { SyncProvider } from '@/providers/SyncProvider';
+import { AppTheme } from '@/constants/theme';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -46,32 +47,50 @@ function RouteGuard() {
   if (authLoading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#2f6f3e" size="large" />
-        <Text style={styles.loadingText}>Восстанавливаем сессию пользователя...</Text>
+        <ActivityIndicator color={AppTheme.colors.primary} size="large" />
+        <Text style={styles.loadingText}>Восстанавливаем пользовательскую сессию...</Text>
       </View>
     );
   }
 
   return (
-    <Stack>
+    <Stack
+      screenOptions={{
+        headerShadowVisible: false,
+        headerTitleAlign: 'center',
+        headerStyle: {
+          backgroundColor: AppTheme.colors.surfaceElevated,
+        },
+        headerTintColor: AppTheme.colors.text,
+        headerTitleStyle: {
+          color: AppTheme.colors.text,
+          fontSize: 18,
+          fontWeight: '800',
+        },
+        contentStyle: {
+          backgroundColor: AppTheme.colors.page,
+        },
+      }}
+    >
       <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Меню' }} />
       <Stack.Screen name="catalog/[id]" options={{ title: 'Справочник' }} />
+      <Stack.Screen name="settings/account" options={{ title: 'Аккаунт' }} />
+      <Stack.Screen name="settings/sync" options={{ title: 'Синхронизация' }} />
+      <Stack.Screen name="settings/notifications" options={{ title: 'Уведомления' }} />
+      <Stack.Screen name="settings/backup" options={{ title: 'Резервная копия' }} />
       <Stack.Screen name="plant/add" options={{ title: 'Добавить растение' }} />
       <Stack.Screen name="plant/[id]" options={{ title: 'Карточка растения' }} />
       <Stack.Screen name="plant/chat/[id]" options={{ title: 'Помощник по растению' }} />
       <Stack.Screen name="plant/edit/[id]" options={{ title: 'Редактировать растение' }} />
-      <Stack.Screen name="plant/analysis/[id]" options={{ title: 'AI-анализ фото' }} />
+      <Stack.Screen name="plant/analysis/[id]" options={{ title: 'Анализ фото' }} />
       <Stack.Screen
         name="plant/recommendations/[id]"
         options={{ title: 'Рекомендации по уходу' }}
       />
       <Stack.Screen name="plant/health/[id]" options={{ title: 'Состояние растения' }} />
       <Stack.Screen name="task/[id]" options={{ title: 'Задача' }} />
-      <Stack.Screen
-        name="modal"
-        options={{ presentation: 'modal', title: 'Информация' }}
-      />
+      <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Информация' }} />
     </Stack>
   );
 }
@@ -80,6 +99,22 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
   const [isReady, setIsReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const navigationTheme =
+    colorScheme === 'dark'
+      ? DarkTheme
+      : {
+          ...DefaultTheme,
+          colors: {
+            ...DefaultTheme.colors,
+            background: AppTheme.colors.page,
+            border: AppTheme.colors.stroke,
+            card: AppTheme.colors.surfaceElevated,
+            notification: AppTheme.colors.accent,
+            primary: AppTheme.colors.primary,
+            text: AppTheme.colors.text,
+          },
+        };
 
   useEffect(() => {
     let isMounted = true;
@@ -121,16 +156,16 @@ export default function RootLayout() {
   if (!isReady) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#2f6f3e" size="large" />
+        <ActivityIndicator color={AppTheme.colors.primary} size="large" />
         <Text style={styles.loadingText}>
-          Подготавливаем локальную базу, задачи и уведомления...
+          Подготавливаем приложение...
         </Text>
       </View>
     );
   }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={navigationTheme}>
       <AuthProvider>
         <SyncProvider>
           <RouteGuard />
@@ -144,26 +179,27 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   centered: {
     alignItems: 'center',
-    backgroundColor: '#f6f7f2',
+    backgroundColor: AppTheme.colors.page,
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
   loadingText: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 15,
+    lineHeight: 22,
     marginTop: 14,
     textAlign: 'center',
   },
   errorTitle: {
-    color: '#9a3412',
+    color: AppTheme.colors.danger,
     fontSize: 22,
-    fontWeight: '700',
+    fontWeight: '800',
     marginBottom: 8,
     textAlign: 'center',
   },
   errorText: {
-    color: '#7c2d12',
+    color: '#7c473f',
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',

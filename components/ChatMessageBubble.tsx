@@ -1,15 +1,28 @@
 import { useMemo } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
+import { AiActionList } from '@/components/AiActionList';
+import { AppTheme } from '@/constants/theme';
 import { formatDateTime } from '@/lib/formatters';
 import { getPlantPhotoPublicUrl } from '@/lib/storage';
+import type { AiAction } from '@/types/ai-action';
 import type { ChatMessage } from '@/types/chat';
 
 type Props = {
   message: ChatMessage;
+  onApplyAction?: (action: AiAction, message: ChatMessage) => void;
+  applyingActionId?: string | null;
+  appliedActionIds?: string[];
+  hiddenActionIds?: string[];
 };
 
-export function ChatMessageBubble({ message }: Props) {
+export function ChatMessageBubble({
+  message,
+  onApplyAction,
+  applyingActionId = null,
+  appliedActionIds = [],
+  hiddenActionIds = [],
+}: Props) {
   const isAssistant = message.role === 'assistant';
   const imageUri = useMemo(
     () => (message.imagePath ? getPlantPhotoPublicUrl(message.imagePath) : null),
@@ -19,9 +32,14 @@ export function ChatMessageBubble({ message }: Props) {
   return (
     <View style={[styles.row, isAssistant ? styles.assistantRow : styles.userRow]}>
       <View style={[styles.bubble, isAssistant ? styles.assistantBubble : styles.userBubble]}>
-        <Text style={[styles.roleLabel, isAssistant ? styles.assistantLabel : styles.userLabel]}>
-          {isAssistant ? 'Помощник' : message.role === 'system' ? 'Система' : 'Вы'}
-        </Text>
+        <View style={styles.header}>
+          <Text style={[styles.roleLabel, isAssistant ? styles.assistantLabel : styles.userLabel]}>
+            {isAssistant ? 'Помощник' : message.role === 'system' ? 'Система' : 'Вы'}
+          </Text>
+          <Text style={[styles.meta, isAssistant ? styles.assistantMeta : styles.userMeta]}>
+            {formatDateTime(message.createdAt)}
+          </Text>
+        </View>
 
         {imageUri ? <Image source={{ uri: imageUri }} style={styles.image} /> : null}
 
@@ -31,9 +49,17 @@ export function ChatMessageBubble({ message }: Props) {
           </Text>
         ) : null}
 
-        <Text style={[styles.meta, isAssistant ? styles.assistantMeta : styles.userMeta]}>
-          {formatDateTime(message.createdAt)}
-        </Text>
+        {isAssistant && message.actions.length > 0 && onApplyAction ? (
+        <AiActionList
+          actions={message.actions}
+          appliedActionIds={appliedActionIds}
+          applyingActionId={applyingActionId}
+          hideApplied
+          hiddenActionIds={hiddenActionIds}
+          onApply={(action) => onApplyAction(action, message)}
+          title="Можно сделать сразу"
+        />
+        ) : null}
       </View>
     </View>
   );
@@ -41,7 +67,7 @@ export function ChatMessageBubble({ message }: Props) {
 
 const styles = StyleSheet.create({
   row: {
-    marginBottom: 12,
+    marginBottom: 14,
   },
   assistantRow: {
     alignItems: 'flex-start',
@@ -50,54 +76,62 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   bubble: {
-    borderRadius: 18,
-    maxWidth: '88%',
-    padding: 14,
+    borderRadius: 26,
+    maxWidth: '92%',
+    overflow: 'hidden',
+    padding: 15,
   },
   assistantBubble: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
+    ...AppTheme.shadow.card,
+    backgroundColor: AppTheme.colors.surfaceElevated,
+    borderColor: AppTheme.colors.stroke,
+    borderTopLeftRadius: 12,
     borderWidth: 1,
   },
   userBubble: {
-    backgroundColor: '#2f6f3e',
+    backgroundColor: AppTheme.colors.primary,
+    borderTopRightRadius: 12,
+  },
+  header: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
   },
   roleLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 6,
+    fontSize: 11,
+    fontWeight: '800',
     textTransform: 'uppercase',
   },
   assistantLabel: {
-    color: '#667085',
+    color: AppTheme.colors.primaryStrong,
   },
   userLabel: {
-    color: '#d8f1de',
+    color: 'rgba(255,255,255,0.85)',
   },
   text: {
     fontSize: 15,
-    lineHeight: 21,
+    lineHeight: 22,
   },
   assistantText: {
-    color: '#163020',
+    color: AppTheme.colors.text,
   },
   userText: {
-    color: '#ffffff',
+    color: AppTheme.colors.white,
   },
   meta: {
-    fontSize: 12,
-    marginTop: 8,
+    fontSize: 11,
   },
   assistantMeta: {
-    color: '#667085',
+    color: AppTheme.colors.textSoft,
   },
   userMeta: {
-    color: '#d8f1de',
+    color: 'rgba(255,255,255,0.75)',
   },
   image: {
-    borderRadius: 14,
-    height: 180,
+    borderRadius: 18,
+    height: 188,
     marginBottom: 10,
-    width: 180,
+    width: 188,
   },
 });

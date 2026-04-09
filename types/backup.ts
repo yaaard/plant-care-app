@@ -1,4 +1,5 @@
 import type { PlantAiAnalysis } from '@/types/ai-analysis';
+import type { AiActionHistory } from '@/types/ai-action';
 import type { ChatMessage, ChatThread } from '@/types/chat';
 import type { CareLog } from '@/types/log';
 import type { Plant } from '@/types/plant';
@@ -17,6 +18,7 @@ export interface AppBackup {
   careTasks: CareTask[];
   careLogs: CareLog[];
   aiAnalyses: PlantAiAnalysis[];
+  aiActionHistory: AiActionHistory[];
   chatThreads: ChatThread[];
   chatMessages: ChatMessage[];
   settings: AppSettings;

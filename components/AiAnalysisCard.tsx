@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AppTheme } from '@/constants/theme';
 import { formatAiOverallCondition, formatAiUrgency, formatDateTime } from '@/lib/formatters';
 import type { PlantAiAnalysis } from '@/types/ai-analysis';
 
@@ -43,25 +44,23 @@ export function AiAnalysisCard({
 
   return (
     <View style={styles.card}>
-      {showHeaderLabel ? <Text style={styles.headerLabel}>AI-анализ</Text> : null}
+      <View style={styles.metaRow}>
+        {showHeaderLabel ? <Text style={styles.headerLabel}>Последний снимок</Text> : <View />}
+        <Text style={styles.dateText}>{formatDateTime(analysis.createdAt)}</Text>
+      </View>
 
-      <View style={styles.headerRow}>
-        <View style={styles.headerTextBlock}>
-          <Text style={styles.summaryText}>{analysis.summary}</Text>
-          <Text style={styles.dateText}>{formatDateTime(analysis.createdAt)}</Text>
+      <Text style={styles.summaryText}>{analysis.summary}</Text>
+
+      <View style={styles.badges}>
+        <View style={[styles.badge, styles.conditionBadge]}>
+          <Text style={styles.conditionBadgeText}>
+            {formatAiOverallCondition(analysis.overallCondition)}
+          </Text>
         </View>
-
-        <View style={styles.badges}>
-          <View style={[styles.badge, styles.conditionBadge]}>
-            <Text style={styles.conditionBadgeText}>
-              {formatAiOverallCondition(analysis.overallCondition)}
-            </Text>
-          </View>
-          <View style={[styles.badge, urgencyStyle]}>
-            <Text style={styles.urgencyBadgeText}>
-              Срочность: {formatAiUrgency(analysis.urgency)}
-            </Text>
-          </View>
+        <View style={[styles.badge, urgencyStyle]}>
+          <Text style={styles.urgencyBadgeText}>
+            Срочность: {formatAiUrgency(analysis.urgency)}
+          </Text>
         </View>
       </View>
 
@@ -76,26 +75,40 @@ export function AiAnalysisCard({
 
       {expanded ? (
         <View style={styles.details}>
-          <Text style={styles.sectionTitle}>Замеченные признаки</Text>
-          {renderList(analysis.observedSigns)}
+          <View style={styles.panel}>
+            <Text style={styles.sectionTitle}>Замеченные признаки</Text>
+            {renderList(analysis.observedSigns)}
+          </View>
 
-          <Text style={styles.sectionTitle}>Возможные причины</Text>
-          {renderList(analysis.possibleCauses)}
+          <View style={styles.panel}>
+            <Text style={styles.sectionTitle}>Возможные причины</Text>
+            {renderList(analysis.possibleCauses)}
+          </View>
 
-          <Text style={styles.sectionTitle}>Совет по поливу</Text>
-          <Text style={styles.bodyText}>{analysis.wateringAdvice}</Text>
+          <View style={styles.adviceGrid}>
+            <View style={[styles.adviceCard, styles.adviceCardPrimary]}>
+              <Text style={styles.adviceLabel}>Полив</Text>
+              <Text style={styles.adviceText}>{analysis.wateringAdvice}</Text>
+            </View>
+            <View style={styles.adviceCard}>
+              <Text style={styles.adviceLabel}>Освещение</Text>
+              <Text style={styles.adviceText}>{analysis.lightAdvice}</Text>
+            </View>
+            <View style={styles.adviceCard}>
+              <Text style={styles.adviceLabel}>Влажность</Text>
+              <Text style={styles.adviceText}>{analysis.humidityAdvice}</Text>
+            </View>
+          </View>
 
-          <Text style={styles.sectionTitle}>Совет по освещению</Text>
-          <Text style={styles.bodyText}>{analysis.lightAdvice}</Text>
+          <View style={styles.panel}>
+            <Text style={styles.sectionTitle}>Рекомендуемые действия</Text>
+            {renderList(analysis.recommendedActions)}
+          </View>
 
-          <Text style={styles.sectionTitle}>Совет по влажности</Text>
-          <Text style={styles.bodyText}>{analysis.humidityAdvice}</Text>
-
-          <Text style={styles.sectionTitle}>Рекомендуемые действия</Text>
-          {renderList(analysis.recommendedActions)}
-
-          <Text style={styles.sectionTitle}>Важно</Text>
-          <Text style={styles.footnote}>{analysis.confidenceNote}</Text>
+          <View style={styles.footnoteCard}>
+            <Text style={styles.footnoteLabel}>Важно помнить</Text>
+            <Text style={styles.footnote}>{analysis.confidenceNote}</Text>
+          </View>
         </View>
       ) : null}
     </View>
@@ -104,99 +117,146 @@ export function AiAnalysisCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 20,
+    ...AppTheme.shadow.card,
+    backgroundColor: AppTheme.colors.surface,
+    borderColor: AppTheme.colors.stroke,
+    borderRadius: AppTheme.radius.xxl,
     borderWidth: 1,
     marginBottom: 12,
+    overflow: 'hidden',
     padding: 18,
   },
+  metaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
   headerLabel: {
-    color: '#667085',
-    fontSize: 12,
+    color: AppTheme.colors.primaryStrong,
+    fontSize: 11,
     fontWeight: '700',
-    marginBottom: 10,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
-  headerRow: {
-    gap: 12,
-  },
-  headerTextBlock: {
-    gap: 8,
+  dateText: {
+    color: AppTheme.colors.textMuted,
+    fontSize: 12,
   },
   summaryText: {
-    color: '#163020',
-    fontSize: 17,
-    fontWeight: '700',
-    lineHeight: 24,
-  },
-  dateText: {
-    color: '#667085',
-    fontSize: 13,
+    color: AppTheme.colors.text,
+    fontSize: 20,
+    fontWeight: '800',
+    lineHeight: 27,
+    marginTop: 10,
   },
   badges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
+    marginTop: 14,
   },
   badge: {
     alignSelf: 'flex-start',
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
   },
   conditionBadge: {
-    backgroundColor: '#edf7ef',
+    backgroundColor: AppTheme.colors.primarySoft,
   },
   conditionBadgeText: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
     fontSize: 12,
     fontWeight: '700',
   },
   lowTone: {
-    backgroundColor: '#ecfdf3',
+    backgroundColor: AppTheme.colors.successSoft,
   },
   mediumTone: {
-    backgroundColor: '#fff7e6',
+    backgroundColor: AppTheme.colors.warningSoft,
   },
   highTone: {
-    backgroundColor: '#fff1e8',
+    backgroundColor: AppTheme.colors.dangerSoft,
   },
   urgencyBadgeText: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 12,
     fontWeight: '700',
   },
   toggleButton: {
     alignItems: 'center',
-    backgroundColor: '#f4f7f3',
-    borderRadius: 12,
-    marginTop: 14,
+    backgroundColor: AppTheme.colors.surfaceMuted,
+    borderRadius: AppTheme.radius.md,
+    marginTop: 16,
     minHeight: 42,
     justifyContent: 'center',
     paddingHorizontal: 12,
   },
   toggleButtonText: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
     fontSize: 14,
     fontWeight: '700',
   },
   details: {
-    marginTop: 14,
+    gap: 12,
+    marginTop: 16,
+  },
+  panel: {
+    backgroundColor: AppTheme.colors.surfaceMuted,
+    borderRadius: AppTheme.radius.lg,
+    padding: 14,
   },
   sectionTitle: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 6,
-    marginTop: 10,
   },
   bodyText: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 14,
     lineHeight: 21,
     marginBottom: 4,
   },
+  adviceGrid: {
+    gap: 10,
+  },
+  adviceCard: {
+    backgroundColor: AppTheme.colors.surfaceMuted,
+    borderRadius: AppTheme.radius.lg,
+    padding: 14,
+  },
+  adviceCardPrimary: {
+    backgroundColor: AppTheme.colors.surfaceSoft,
+  },
+  adviceLabel: {
+    color: AppTheme.colors.textSoft,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  adviceText: {
+    color: AppTheme.colors.text,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  footnoteCard: {
+    backgroundColor: AppTheme.colors.surfaceSoft,
+    borderRadius: AppTheme.radius.lg,
+    padding: 14,
+  },
+  footnoteLabel: {
+    color: AppTheme.colors.primaryStrong,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
   footnote: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
     lineHeight: 19,
   },

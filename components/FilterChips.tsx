@@ -1,4 +1,6 @@
-import { ScrollView, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { AppTheme } from '@/constants/theme';
 
 export type FilterChipOption<T extends string> = {
   key: T;
@@ -21,7 +23,12 @@ export function FilterChips<T extends string>({
   return (
     <View style={styles.container}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <ScrollView
+        horizontal
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        keyboardShouldPersistTaps="handled"
+        showsHorizontalScrollIndicator={false}
+      >
         <View style={styles.chipsRow}>
           {options.map((option) => {
             const selected = option.key === selectedKey;
@@ -53,10 +60,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   label: {
-    color: '#163020',
-    fontSize: 13,
+    color: AppTheme.colors.textMuted,
+    fontSize: 12,
     fontWeight: '700',
     marginBottom: 8,
+    textTransform: 'uppercase',
   },
   chipsRow: {
     flexDirection: 'row',
@@ -64,24 +72,24 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   chip: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 999,
+    backgroundColor: AppTheme.colors.surfaceElevated,
+    borderColor: AppTheme.colors.strokeStrong,
+    borderRadius: AppTheme.radius.pill,
     borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingHorizontal: 15,
+    paddingVertical: 11,
   },
   chipSelected: {
-    backgroundColor: '#edf7ef',
-    borderColor: '#2f6f3e',
+    backgroundColor: AppTheme.colors.primarySoft,
+    borderColor: AppTheme.colors.primarySoft,
   },
   chipText: {
-    color: '#435249',
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   chipTextSelected: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
   },
   pressed: {
     opacity: 0.9,

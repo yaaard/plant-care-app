@@ -138,8 +138,7 @@ export default function PlantRecommendationsScreen() {
 
           <Text style={styles.summaryText}>{recommendation.summary}</Text>
           <Text style={styles.noteText}>
-            Советы носят ориентировочный характер и формируются локально на основе правил,
-            справочника растения, задач ухода и зафиксированного состояния.
+            Советы составлены на основе состояния растения, истории ухода и справочных данных.
           </Text>
         </View>
 

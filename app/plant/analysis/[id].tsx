@@ -1,26 +1,35 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
-  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Stack, type Href, useLocalSearchParams, useRouter } from 'expo-router';
 
+import { AiActionList } from '@/components/AiActionList';
 import { AiAnalysisCard } from '@/components/AiAnalysisCard';
 import { EmptyState } from '@/components/EmptyState';
 import { SectionTitle } from '@/components/SectionTitle';
+import { Button } from '@/components/ui/Button';
+import { InlineBanner } from '@/components/ui/InlineBanner';
+import { SurfaceCard } from '@/components/ui/SurfaceCard';
+import { AppTheme } from '@/constants/theme';
 import { useAiAnalyses } from '@/hooks/useAiAnalyses';
 import { useSync } from '@/hooks/useSync';
+import { executeAiAction } from '@/lib/ai-actions';
+import { formatAiUrgency, formatDateTime } from '@/lib/formatters';
 import { requestPlantAiAnalysis } from '@/lib/gemini-client';
 import { getPlantById } from '@/lib/plants-repo';
 import { getErrorMessage } from '@/lib/validators';
+import type { AiAction } from '@/types/ai-action';
 import type { Plant } from '@/types/plant';
 
 function normalizeParam(value: string | string[] | undefined) {
@@ -32,10 +41,21 @@ type FeedbackState = {
   text: string;
 } | null;
 
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.statPill}>
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statValue}>{value}</Text>
+    </View>
+  );
+}
+
 export default function PlantPhotoAnalysisScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const plantId = normalizeParam(params.id);
+  const { width } = useWindowDimensions();
+  const isWide = width >= 900;
   const { syncNow, isSyncing } = useSync();
   const { analyses, latestAnalysis, loading: analysesLoading, reload: reloadAnalyses } =
     useAiAnalyses(plantId);
@@ -43,35 +63,30 @@ export default function PlantPhotoAnalysisScreen() {
   const [plant, setPlant] = useState<Plant | null>(null);
   const [loadingPlant, setLoadingPlant] = useState(true);
   const [runningAnalysis, setRunningAnalysis] = useState(false);
+  const [applyingActionId, setApplyingActionId] = useState<string | null>(null);
+  const [appliedActionIds, setAppliedActionIds] = useState<string[]>([]);
+  const [hiddenActionIds, setHiddenActionIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<FeedbackState>(null);
 
   const loadPlant = useCallback(async () => {
     if (!plantId) {
       setPlant(null);
-      setFeedback({
-        type: 'error',
-        text: 'Не удалось определить растение для AI-анализа.',
-      });
+      setFeedback({ type: 'error', text: 'Не удалось определить растение для проверки фото.' });
       setLoadingPlant(false);
       return;
     }
 
     setLoadingPlant(true);
-
     try {
       const nextPlant = await getPlantById(plantId);
       setPlant(nextPlant);
-
       if (!nextPlant) {
-        setFeedback({
-          type: 'error',
-          text: 'Растение не найдено или уже было удалено.',
-        });
+        setFeedback({ type: 'error', text: 'Растение не найдено или уже было удалено.' });
       }
     } catch (error) {
       setFeedback({
         type: 'error',
-        text: getErrorMessage(error, 'Не удалось загрузить растение для AI-анализа.'),
+        text: getErrorMessage(error, 'Не удалось загрузить растение для проверки фото.'),
       });
     } finally {
       setLoadingPlant(false);
@@ -88,26 +103,16 @@ export default function PlantPhotoAnalysisScreen() {
     if (!plantId) {
       return;
     }
-
-    router.push({
-      pathname: '/plant/edit/[id]',
-      params: { id: plantId },
-    } as unknown as Href);
+    router.push({ pathname: '/plant/edit/[id]', params: { id: plantId } } as unknown as Href);
   };
 
   const confirmPhotoRequirement = () => {
     Alert.alert(
       'Сначала добавьте фото растения',
-      'Без фотографии AI-анализ не сможет оценить состояние растения. Откройте редактирование и прикрепите фото из галереи.',
+      'Без фотографии не получится оценить состояние растения. Добавьте снимок из галереи.',
       [
-        {
-          text: 'Отмена',
-          style: 'cancel',
-        },
-        {
-          text: 'Открыть редактирование',
-          onPress: openEditPhoto,
-        },
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Открыть редактирование', onPress: openEditPhoto },
       ]
     );
   };
@@ -116,80 +121,85 @@ export default function PlantPhotoAnalysisScreen() {
     if (!plantId || !plant) {
       return;
     }
-
     if (!plant.photoUri && !plant.photoPath) {
       confirmPhotoRequirement();
       return;
     }
-
     if (isSyncing) {
       setFeedback({
         type: 'info',
-        text: 'Сначала дождитесь завершения текущей синхронизации, затем запустите AI-анализ ещё раз.',
+        text: 'Сначала дождитесь завершения обновления данных, затем попробуйте ещё раз.',
       });
       return;
     }
 
     setRunningAnalysis(true);
-    setFeedback({
-      type: 'info',
-      text: 'Подготавливаем фото и отправляем запрос на AI-анализ...',
-    });
-
+    setFeedback({ type: 'info', text: 'Подготавливаем фото к проверке...' });
     try {
-      if (
-        plant.photoUri?.startsWith('file') ||
-        plant.syncStatus !== 'synced' ||
-        !plant.photoPath
-      ) {
+      if (plant.photoUri?.startsWith('file') || plant.syncStatus !== 'synced' || !plant.photoPath) {
         const syncCompleted = await syncNow();
-
         if (!syncCompleted) {
-          throw new Error(
-            'Не удалось подготовить фото для анализа. Проверьте интернет и повторите попытку.'
-          );
+          throw new Error('Не удалось подготовить фото для анализа. Проверьте интернет и повторите попытку.');
         }
-
         await loadPlant();
       }
 
       const refreshedPlant = await getPlantById(plantId);
-
       if (!refreshedPlant?.photoPath) {
-        throw new Error(
-          'Фото растения ещё не готово для облачного анализа. Сначала завершите синхронизацию фотографии.'
-        );
+        throw new Error('Фото растения ещё не готово. Дождитесь обновления снимка и попробуйте снова.');
       }
 
-      setFeedback({
-        type: 'info',
-        text: 'Идет анализ фото. Это может занять до минуты.',
-      });
-
+      setFeedback({ type: 'info', text: 'Идёт анализ фото. Это может занять до минуты.' });
       await requestPlantAiAnalysis(plantId);
       await reloadAnalyses();
       await loadPlant();
-
-      setFeedback({
-        type: 'success',
-        text: 'AI-анализ успешно сохранён и добавлен в историю растения.',
-      });
+      setFeedback({ type: 'success', text: 'Проверка фото завершена. Результат сохранён в истории растения.' });
     } catch (error) {
       setFeedback({
         type: 'error',
-        text: getErrorMessage(error, 'Не удалось выполнить AI-анализ растения.'),
+        text: getErrorMessage(error, 'Не удалось выполнить проверку фото растения.'),
       });
     } finally {
       setRunningAnalysis(false);
     }
   };
 
+  const handleApplyAction = async (action: AiAction) => {
+    if (!latestAnalysis || applyingActionId) {
+      return;
+    }
+    setApplyingActionId(action.id);
+    try {
+      const result = await executeAiAction(action, { source: { plantId, analysisId: latestAnalysis.id } });
+      if (result.status === 'dismissed') {
+        setHiddenActionIds((current) => (current.includes(action.id) ? current : [...current, action.id]));
+      } else {
+        setAppliedActionIds((current) => (current.includes(action.id) ? current : [...current, action.id]));
+      }
+      if (result.status === 'navigated') {
+        router.push(result.navigationTarget as Href);
+      }
+      await Promise.all([reloadAnalyses(), loadPlant()]);
+      setFeedback({ type: 'success', text: result.message });
+    } catch (error) {
+      setFeedback({ type: 'error', text: getErrorMessage(error, 'Не удалось применить действие.') });
+    } finally {
+      setApplyingActionId(null);
+    }
+  };
+
+  const photoReady = Boolean(plant?.photoPath);
+  const latestSummaryPoints = useMemo(
+    () => latestAnalysis?.recommendedActions.slice(0, 3) ?? [],
+    [latestAnalysis]
+  );
+
   if (loadingPlant && !plant) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.centered}>
-          <ActivityIndicator color="#2f6f3e" size="large" />
-          <Text style={styles.centeredText}>Готовим экран AI-анализа...</Text>
+          <ActivityIndicator color={AppTheme.colors.primary} size="large" />
+          <Text style={styles.centeredText}>Готовим результаты проверки...</Text>
         </View>
       </SafeAreaView>
     );
@@ -198,13 +208,13 @@ export default function PlantPhotoAnalysisScreen() {
   if (!plant) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <Stack.Screen options={{ title: 'AI-анализ' }} />
+        <Stack.Screen options={{ title: 'Анализ фото' }} />
         <View style={styles.content}>
           <EmptyState
             actionLabel="Вернуться к растениям"
             description={feedback?.text ?? 'Растение не найдено или уже было удалено.'}
             onActionPress={() => router.replace('/(tabs)/plants' as Href)}
-            title="AI-анализ недоступен"
+            title="Проверка фото недоступна"
           />
         </View>
       </SafeAreaView>
@@ -213,244 +223,159 @@ export default function PlantPhotoAnalysisScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Stack.Screen options={{ title: `AI-анализ: ${plant.name}` }} />
+      <Stack.Screen options={{ title: `Анализ фото: ${plant.name}` }} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {plant.photoUri ? (
-          <Image source={{ uri: plant.photoUri }} style={styles.photo} />
-        ) : (
-          <View style={styles.photoPlaceholder}>
-            <Text style={styles.photoPlaceholderTitle}>Фото пока не добавлено</Text>
-            <Text style={styles.photoPlaceholderSubtitle}>
-              Для AI-анализа нужен снимок растения. Можно прикрепить его на экране редактирования.
-            </Text>
+        <View style={styles.heroWrap}>
+          <View style={styles.heroMedia}>
+            {plant.photoUri ? (
+              <Image source={{ uri: plant.photoUri }} style={styles.heroImage} />
+            ) : (
+              <View style={styles.heroPlaceholder}>
+                <Ionicons color={AppTheme.colors.primaryStrong} name="image-outline" size={32} />
+                <Text style={styles.heroPlaceholderTitle}>Фото пока не добавлено</Text>
+                <Text style={styles.heroPlaceholderText}>
+                  Для проверки нужен снимок растения. Его можно добавить в карточке редактирования.
+                </Text>
+              </View>
+            )}
+            <View style={styles.heroShade} />
+            <View style={styles.heroScanBadge}>
+              <Ionicons color={AppTheme.colors.white} name="scan-outline" size={16} />
+              <Text style={styles.heroScanText}>Фото</Text>
+            </View>
           </View>
-        )}
 
-        <View style={styles.card}>
-          <SectionTitle title="AI-анализ фото" />
-          <Text style={styles.bodyText}>
-            AI анализирует фото растения, формирует аккуратный вероятностный вывод и сохраняет его
-            в ваш аккаунт. Результат не заменяет очный осмотр растения.
-          </Text>
-
-          <Pressable
-            disabled={runningAnalysis || loadingPlant || isSyncing}
-            onPress={() => {
-              void handleRunAnalysis();
-            }}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              (pressed || runningAnalysis || loadingPlant || isSyncing) && styles.pressed,
-            ]}
-          >
-            <Text style={styles.primaryButtonText}>
-              {runningAnalysis
-                ? 'Идет анализ...'
-                : isSyncing
-                  ? 'Синхронизируем фото...'
-                  : 'Проанализировать растение'}
+          <SurfaceCard style={styles.heroCard}>
+            <Text style={styles.kicker}>{plant.species}</Text>
+            <Text style={styles.title}>Проверка фото {plant.name}</Text>
+            <Text style={styles.bodyText}>
+              Здесь хранится история фотоанализов, статус текущего снимка и готовые действия, которые можно применить сразу.
             </Text>
-          </Pressable>
 
-          <View style={styles.buttonSpacer} />
+            <View style={styles.metricRow}>
+              <StatPill label="Снимок" value={photoReady ? 'Готово' : 'Нужно фото'} />
+              <StatPill label="Статус" value={latestAnalysis ? formatAiUrgency(latestAnalysis.urgency) : 'нет'} />
+              <StatPill label="Анализов" value={String(analyses.length)} />
+            </View>
 
-          <Pressable
-            onPress={openEditPhoto}
-            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.secondaryButtonText}>Обновить фото</Text>
-          </Pressable>
+            <View style={styles.buttonRow}>
+              <Button
+                label={
+                  runningAnalysis
+                    ? 'Идёт анализ...'
+                    : isSyncing
+                      ? 'Синхронизируем фото...'
+                      : 'Проанализировать растение'
+                }
+                onPress={() => {
+                  void handleRunAnalysis();
+                }}
+              />
+              <Button compact label="Обновить фото" onPress={openEditPhoto} tone="secondary" />
+            </View>
+          </SurfaceCard>
         </View>
 
-        {feedback ? (
-          <View
-            style={[
-              styles.messageBox,
-              feedback.type === 'success'
-                ? styles.successBox
-                : feedback.type === 'error'
-                  ? styles.errorBox
-                  : styles.infoBox,
-            ]}
-          >
-            <Text
-              style={[
-                styles.messageText,
-                feedback.type === 'success'
-                  ? styles.successText
-                  : feedback.type === 'error'
-                    ? styles.errorText
-                    : styles.infoText,
-              ]}
-            >
-              {feedback.text}
-            </Text>
-          </View>
-        ) : null}
+        {feedback ? <InlineBanner text={feedback.text} tone={feedback.type} /> : null}
 
-        <SectionTitle title="Последний анализ" />
-        {latestAnalysis ? (
-          <AiAnalysisCard analysis={latestAnalysis} defaultExpanded />
-        ) : analysesLoading ? (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator color="#2f6f3e" />
-            <Text style={styles.loadingText}>Загружаем историю анализов...</Text>
-          </View>
-        ) : (
-          <EmptyState
-            description="После первого успешного запуска здесь появится последний AI-анализ с полными рекомендациями."
-            title="Анализов пока нет"
-          />
-        )}
+        <View style={[styles.twoCol, !isWide && styles.twoColStack]}>
+          <SurfaceCard style={styles.mainCol}>
+            <SectionTitle title="Последний анализ" />
+            {latestAnalysis ? (
+              <>
+                <AiAnalysisCard analysis={latestAnalysis} defaultExpanded />
+                <AiActionList
+                  actions={latestAnalysis.actions}
+                  appliedActionIds={appliedActionIds}
+                  applyingActionId={applyingActionId}
+                  emptyText="Для этого анализа пока нет действий, которые можно применить одной кнопкой."
+                  hiddenActionIds={hiddenActionIds}
+                  onApply={(action) => {
+                    void handleApplyAction(action);
+                  }}
+                  title="Рекомендуемые действия"
+                />
+              </>
+            ) : analysesLoading ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator color={AppTheme.colors.primary} />
+                <Text style={styles.loadingText}>Загружаем историю анализов...</Text>
+              </View>
+            ) : (
+              <EmptyState
+                description="После первой проверки здесь появится последний результат с рекомендациями."
+                title="Анализов пока нет"
+              />
+            )}
+          </SurfaceCard>
 
-        <SectionTitle title="История анализов" />
-        {analyses.length > 1 ? (
-          analyses.slice(1).map((analysis) => (
-            <AiAnalysisCard key={analysis.id} analysis={analysis} />
-          ))
-        ) : (
-          <EmptyState
-            description="Когда вы запустите анализ повторно, предыдущие результаты будут храниться здесь и останутся доступны локально."
-            title="История пока пуста"
-          />
-        )}
+          <SurfaceCard style={styles.sideCol} tone="soft">
+            <SectionTitle title="Что сделать сейчас" />
+            {latestSummaryPoints.length > 0 ? (
+              latestSummaryPoints.map((item) => (
+                <Text key={item} style={styles.bodyText}>
+                  • {item}
+                </Text>
+              ))
+            ) : (
+              <Text style={styles.bodyText}>После первого анализа здесь появятся главные шаги.</Text>
+            )}
+            <View style={styles.sideMetaCard}>
+              <Text style={styles.sideMetaLabel}>Последнее обновление</Text>
+              <Text style={styles.sideMetaValue}>
+                {latestAnalysis ? formatDateTime(latestAnalysis.createdAt) : '—'}
+              </Text>
+            </View>
+          </SurfaceCard>
+        </View>
+
+        <SurfaceCard>
+          <SectionTitle title="История анализов" />
+          {analyses.length > 1 ? (
+            analyses.slice(1).map((analysis) => <AiAnalysisCard key={analysis.id} analysis={analysis} />)
+          ) : (
+            <EmptyState
+              description="Когда вы запустите проверку повторно, предыдущие результаты останутся здесь."
+              title="История пока пустая"
+            />
+          )}
+        </SurfaceCard>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    backgroundColor: '#f6f7f2',
-    flex: 1,
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  centered: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  centeredText: {
-    color: '#163020',
-    fontSize: 15,
-    marginTop: 12,
-    textAlign: 'center',
-  },
-  photo: {
-    borderRadius: 20,
-    height: 240,
-    marginBottom: 16,
-    width: '100%',
-  },
-  photoPlaceholder: {
-    alignItems: 'center',
-    backgroundColor: '#edf3ed',
-    borderColor: '#d5ddd2',
-    borderRadius: 20,
-    borderWidth: 1,
-    height: 240,
-    justifyContent: 'center',
-    marginBottom: 16,
-    paddingHorizontal: 24,
-  },
-  photoPlaceholderTitle: {
-    color: '#163020',
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  photoPlaceholderSubtitle: {
-    color: '#667085',
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-  },
-  card: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 20,
-    borderWidth: 1,
-    marginBottom: 16,
-    padding: 18,
-  },
-  bodyText: {
-    color: '#163020',
-    fontSize: 14,
-    lineHeight: 21,
-  },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#2f6f3e',
-    borderRadius: 14,
-    justifyContent: 'center',
-    marginTop: 14,
-    minHeight: 52,
-    paddingHorizontal: 16,
-  },
-  primaryButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#edf7ef',
-    borderRadius: 14,
-    justifyContent: 'center',
-    minHeight: 48,
-    paddingHorizontal: 16,
-  },
-  secondaryButtonText: {
-    color: '#2f6f3e',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  buttonSpacer: {
-    height: 10,
-  },
-  messageBox: {
-    borderRadius: 16,
-    marginBottom: 16,
-    padding: 14,
-  },
-  successBox: {
-    backgroundColor: '#edf7ef',
-  },
-  errorBox: {
-    backgroundColor: '#fff1e8',
-  },
-  infoBox: {
-    backgroundColor: '#eef6ff',
-  },
-  messageText: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  successText: {
-    color: '#2f6f3e',
-  },
-  errorText: {
-    color: '#9a3412',
-  },
-  infoText: {
-    color: '#1d4ed8',
-  },
-  pressed: {
-    opacity: 0.9,
-  },
-  loadingRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
-  },
-  loadingText: {
-    color: '#163020',
-    fontSize: 14,
-  },
+  safeArea: { backgroundColor: AppTheme.colors.page, flex: 1 },
+  content: { padding: AppTheme.spacing.page, paddingBottom: AppTheme.spacing.xxxl },
+  centered: { alignItems: 'center', flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
+  centeredText: { color: AppTheme.colors.text, fontSize: 15, marginTop: 12, textAlign: 'center' },
+  heroWrap: { marginBottom: AppTheme.spacing.section },
+  heroMedia: { borderRadius: AppTheme.radius.xxl, overflow: 'hidden', position: 'relative' },
+  heroImage: { height: 320, width: '100%' },
+  heroPlaceholder: { alignItems: 'center', backgroundColor: AppTheme.colors.surfaceSoft, height: 320, justifyContent: 'center', paddingHorizontal: 28 },
+  heroPlaceholderTitle: { color: AppTheme.colors.text, fontSize: 19, fontWeight: '800', marginTop: 12, textAlign: 'center' },
+  heroPlaceholderText: { color: AppTheme.colors.textMuted, fontSize: 14, lineHeight: 20, marginTop: 8, textAlign: 'center' },
+  heroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23, 32, 25, 0.24)' },
+  heroScanBadge: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.16)', borderColor: 'rgba(255,255,255,0.24)', borderRadius: AppTheme.radius.pill, borderWidth: 1, flexDirection: 'row', gap: 6, left: 16, paddingHorizontal: 12, paddingVertical: 8, position: 'absolute', top: 16 },
+  heroScanText: { color: AppTheme.colors.white, fontSize: 12, fontWeight: '700' },
+  heroCard: { marginHorizontal: 12, marginTop: -44 },
+  kicker: { color: AppTheme.colors.primaryStrong, fontSize: 11, fontWeight: '800', letterSpacing: 0.8, marginBottom: 8, textTransform: 'uppercase' },
+  title: { color: AppTheme.colors.text, fontSize: 31, fontWeight: '800', letterSpacing: -1, lineHeight: 35 },
+  bodyText: { color: AppTheme.colors.text, fontSize: 14, lineHeight: 21, marginTop: 8 },
+  metricRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
+  statPill: { backgroundColor: AppTheme.colors.surfaceMuted, borderRadius: 18, flex: 1, minWidth: 92, paddingHorizontal: 12, paddingVertical: 11 },
+  statLabel: { color: AppTheme.colors.textSoft, fontSize: 11, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
+  statValue: { color: AppTheme.colors.text, fontSize: 15, fontWeight: '800', marginTop: 4 },
+  buttonRow: { gap: 10, marginTop: 16 },
+  twoCol: { flexDirection: 'row', gap: AppTheme.spacing.section, marginBottom: AppTheme.spacing.section },
+  twoColStack: { flexDirection: 'column' },
+  mainCol: { flex: 1.1 },
+  sideCol: { flex: 0.9 },
+  loadingRow: { alignItems: 'center', flexDirection: 'row', gap: 10 },
+  loadingText: { color: AppTheme.colors.text, fontSize: 14 },
+  sideMetaCard: { backgroundColor: AppTheme.colors.surface, borderColor: AppTheme.colors.stroke, borderRadius: AppTheme.radius.lg, borderWidth: 1, marginTop: 16, padding: 14 },
+  sideMetaLabel: { color: AppTheme.colors.textSoft, fontSize: 11, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase' },
+  sideMetaValue: { color: AppTheme.colors.text, fontSize: 14, fontWeight: '700', marginTop: 6 },
 });

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,11 +17,13 @@ import { EmptyState } from '@/components/EmptyState';
 import { FormField } from '@/components/FormField';
 import { HealthTagSelector } from '@/components/HealthTagSelector';
 import { SearchBar } from '@/components/SearchBar';
+import { DismissKeyboard } from '@/components/ui/DismissKeyboard';
 import {
   HUMIDITY_CONDITION_OPTIONS,
   LIGHT_CONDITION_OPTIONS,
 } from '@/constants/plantGuide';
 import { DEFAULT_PLANT_FORM_VALUES } from '@/constants/defaultValues';
+import { AppTheme } from '@/constants/theme';
 import { usePlantCatalog } from '@/hooks/usePlantCatalog';
 import { todayString } from '@/lib/date';
 import { pickImageFromLibraryAsync } from '@/lib/image-picker';
@@ -182,6 +185,7 @@ export function PlantForm({
   }, [catalogPlants, catalogQuery]);
 
   const handlePickPhoto = async () => {
+    Keyboard.dismiss();
     const selectedUri = await pickImageFromLibraryAsync();
 
     if (selectedUri) {
@@ -281,11 +285,13 @@ export function PlantForm({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.flex}
     >
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <DismissKeyboard>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         <View style={styles.photoCard}>
           <Text style={styles.photoTitle}>Фото растения</Text>
 
@@ -479,7 +485,8 @@ export function PlantForm({
         >
           <Text style={styles.primaryButtonText}>{loading ? 'Сохранение...' : submitLabel}</Text>
         </Pressable>
-      </ScrollView>
+        </ScrollView>
+      </DismissKeyboard>
 
       <Modal
         animationType="slide"
@@ -513,11 +520,13 @@ export function PlantForm({
 
             <ScrollView
               contentContainerStyle={styles.modalList}
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               keyboardShouldPersistTaps="handled"
+              onScrollBeginDrag={Keyboard.dismiss}
               showsVerticalScrollIndicator={false}
             >
               {catalogLoading ? (
-                <Text style={styles.helperText}>Загружаем локальный каталог...</Text>
+                <Text style={styles.helperText}>Загружаем каталог растений...</Text>
               ) : null}
 
               {catalogError ? (
@@ -531,7 +540,7 @@ export function PlantForm({
                 <EmptyState
                   description={
                     catalogPlants.length === 0
-                      ? 'Локальный каталог пока пуст. После синхронизации он появится и будет доступен офлайн.'
+                      ? 'Каталог пока пуст. Попробуйте обновить данные немного позже.'
                       : 'По вашему запросу ничего не найдено.'
                   }
                   title={catalogPlants.length === 0 ? 'Каталог ещё не загружен' : 'Ничего не найдено'}
@@ -561,40 +570,41 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    backgroundColor: '#f6f7f2',
+    backgroundColor: AppTheme.colors.page,
     padding: 16,
-    paddingBottom: 32,
+    paddingBottom: 36,
   },
   photoCard: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 18,
+    ...AppTheme.shadow.card,
+    backgroundColor: AppTheme.colors.surface,
+    borderColor: AppTheme.colors.stroke,
+    borderRadius: AppTheme.radius.xl,
     borderWidth: 1,
     marginBottom: 20,
     padding: 16,
   },
   photoTitle: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 12,
   },
   photo: {
-    borderRadius: 14,
+    borderRadius: AppTheme.radius.md,
     height: 220,
     marginBottom: 12,
     width: '100%',
   },
   photoPlaceholder: {
     alignItems: 'center',
-    backgroundColor: '#f0f3ef',
-    borderRadius: 14,
+    backgroundColor: AppTheme.colors.surfaceMuted,
+    borderRadius: AppTheme.radius.md,
     height: 220,
     justifyContent: 'center',
     marginBottom: 12,
   },
   photoPlaceholderText: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 15,
   },
   photoActions: {
@@ -603,66 +613,67 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   secondaryButton: {
-    backgroundColor: '#edf7ef',
-    borderRadius: 12,
+    backgroundColor: AppTheme.colors.primarySoft,
+    borderRadius: AppTheme.radius.md,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   secondaryButtonText: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
     fontSize: 14,
     fontWeight: '700',
   },
   secondaryDangerButton: {
-    backgroundColor: '#fff1e8',
+    backgroundColor: AppTheme.colors.accentSoft,
   },
   secondaryDangerButtonText: {
     color: '#c2410c',
   },
   guideCard: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 18,
+    ...AppTheme.shadow.card,
+    backgroundColor: AppTheme.colors.surface,
+    borderColor: AppTheme.colors.stroke,
+    borderRadius: AppTheme.radius.xl,
     borderWidth: 1,
     marginBottom: 16,
     padding: 16,
   },
   guideTitle: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 6,
   },
   guideSubtitle: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 12,
   },
   selectedCatalogCard: {
-    backgroundColor: '#f7faf7',
-    borderRadius: 14,
+    backgroundColor: AppTheme.colors.surfaceMuted,
+    borderRadius: AppTheme.radius.md,
     marginBottom: 12,
     padding: 12,
   },
   selectedCatalogName: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 2,
   },
   selectedCatalogLatin: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
     marginBottom: 8,
   },
   selectedCatalogSummary: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
     fontSize: 13,
     fontWeight: '600',
   },
   selectedCatalogEmpty: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,
@@ -678,30 +689,30 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   optionChip: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
+    backgroundColor: AppTheme.colors.surface,
+    borderColor: AppTheme.colors.stroke,
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   optionChipSelected: {
-    backgroundColor: '#edf7ef',
-    borderColor: '#2f6f3e',
+    backgroundColor: AppTheme.colors.primarySoft,
+    borderColor: AppTheme.colors.primary,
   },
   optionChipText: {
-    color: '#435249',
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
     fontWeight: '600',
   },
   optionChipTextSelected: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
   },
   groupBlock: {
     marginBottom: 16,
   },
   groupLabel: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
@@ -712,13 +723,13 @@ const styles = StyleSheet.create({
     marginTop: -6,
   },
   linkButtonText: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
     fontSize: 13,
     fontWeight: '600',
   },
   errorBox: {
-    backgroundColor: '#fff1e8',
-    borderRadius: 14,
+    backgroundColor: AppTheme.colors.accentSoft,
+    borderRadius: AppTheme.radius.md,
     marginBottom: 16,
     padding: 14,
   },
@@ -729,15 +740,15 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     alignItems: 'center',
-    backgroundColor: '#2f6f3e',
-    borderRadius: 14,
+    backgroundColor: AppTheme.colors.primary,
+    borderRadius: AppTheme.radius.lg,
     justifyContent: 'center',
     minHeight: 52,
     marginTop: 8,
     paddingHorizontal: 18,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: AppTheme.colors.white,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -745,14 +756,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#7fa48a',
   },
   modalOverlay: {
-    backgroundColor: 'rgba(22, 48, 32, 0.36)',
+    backgroundColor: 'rgba(23, 49, 38, 0.34)',
     flex: 1,
     justifyContent: 'flex-end',
   },
   modalCard: {
-    backgroundColor: '#f6f7f2',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: AppTheme.colors.page,
+    borderTopLeftRadius: AppTheme.radius.xl,
+    borderTopRightRadius: AppTheme.radius.xl,
     maxHeight: '86%',
     padding: 16,
     paddingBottom: 24,
@@ -768,13 +779,13 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   modalTitle: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 4,
   },
   modalSubtitle: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
     lineHeight: 19,
   },
@@ -782,7 +793,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   modalCloseText: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -790,16 +801,17 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   catalogRow: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 16,
+    ...AppTheme.shadow.card,
+    backgroundColor: AppTheme.colors.surface,
+    borderColor: AppTheme.colors.stroke,
+    borderRadius: AppTheme.radius.lg,
     borderWidth: 1,
     marginBottom: 10,
     padding: 14,
   },
   catalogRowSelected: {
-    borderColor: '#2f6f3e',
-    backgroundColor: '#edf7ef',
+    borderColor: AppTheme.colors.primary,
+    backgroundColor: AppTheme.colors.primarySoft,
   },
   catalogRowHeader: {
     alignItems: 'flex-start',
@@ -811,39 +823,39 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   catalogName: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 2,
   },
   catalogLatin: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 13,
     marginBottom: 6,
   },
   catalogSelectedLabel: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
     fontSize: 12,
     fontWeight: '700',
   },
   catalogMeta: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 6,
   },
   catalogDescription: {
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 8,
   },
   catalogSummary: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 12,
   },
   helperText: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,

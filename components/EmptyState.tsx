@@ -1,4 +1,7 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { AppTheme } from '@/constants/theme';
 
 type EmptyStateProps = {
   title: string;
@@ -15,6 +18,10 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <View style={styles.container}>
+      <View style={styles.glow} />
+      <View style={styles.iconWrap}>
+        <Ionicons color={AppTheme.colors.primaryStrong} name="leaf-outline" size={22} />
+      </View>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.description}>{description}</Text>
 
@@ -32,37 +39,60 @@ export function EmptyState({
 
 const styles = StyleSheet.create({
   container: {
+    ...AppTheme.shadow.card,
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 18,
+    backgroundColor: AppTheme.colors.surfaceElevated,
+    borderColor: AppTheme.colors.stroke,
+    borderRadius: AppTheme.radius.xl,
     borderWidth: 1,
     marginTop: 12,
+    overflow: 'hidden',
     paddingHorizontal: 24,
     paddingVertical: 28,
+    position: 'relative',
+  },
+  glow: {
+    backgroundColor: AppTheme.colors.primarySoft,
+    borderRadius: AppTheme.radius.xxl,
+    height: 120,
+    opacity: 0.8,
+    position: 'absolute',
+    right: -28,
+    top: -24,
+    width: 120,
+  },
+  iconWrap: {
+    alignItems: 'center',
+    backgroundColor: AppTheme.colors.surfaceSoft,
+    borderRadius: AppTheme.radius.pill,
+    height: 52,
+    justifyContent: 'center',
+    marginBottom: 16,
+    width: 52,
   },
   title: {
-    color: '#163020',
-    fontSize: 18,
+    color: AppTheme.colors.text,
+    fontSize: 20,
     fontWeight: '700',
     marginBottom: 8,
     textAlign: 'center',
   },
   description: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 15,
     lineHeight: 22,
+    maxWidth: 280,
     textAlign: 'center',
   },
   button: {
-    backgroundColor: '#2f6f3e',
-    borderRadius: 12,
+    backgroundColor: AppTheme.colors.primary,
+    borderRadius: AppTheme.radius.lg,
     marginTop: 18,
     paddingHorizontal: 18,
     paddingVertical: 12,
   },
   buttonText: {
-    color: '#ffffff',
+    color: AppTheme.colors.white,
     fontSize: 14,
     fontWeight: '700',
   },

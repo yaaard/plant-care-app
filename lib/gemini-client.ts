@@ -3,6 +3,7 @@ import {
   ASSISTANT_CHAT_FUNCTION_NAME,
 } from '@/constants/defaultValues';
 import { upsertAiAnalysisLocally } from '@/lib/ai-analyses-repo';
+import { normalizeAiActions } from '@/lib/ai-actions';
 import { upsertChatConversationLocally } from '@/lib/chat-repo';
 import { createId } from '@/lib/db';
 import { uploadAssistantImage } from '@/lib/storage';
@@ -72,6 +73,11 @@ function normalizeAiAnalysis(value: unknown): PlantAiAnalysis {
     lightAdvice: getRequiredString(value.lightAdvice, 'lightAdvice'),
     humidityAdvice: getRequiredString(value.humidityAdvice, 'humidityAdvice'),
     recommendedActions: getStringArray(value.recommendedActions, 'recommendedActions'),
+    actions: normalizeAiActions(value.actions, {
+      plantId: getRequiredString(value.plantId, 'plantId'),
+      createdAt: getRequiredString(value.createdAt, 'createdAt'),
+      createId,
+    }),
     confidenceNote: getRequiredString(value.confidenceNote, 'confidenceNote'),
     rawJson:
       typeof value.rawJson === 'string' && value.rawJson.trim()
@@ -132,6 +138,10 @@ function normalizeMessage(value: unknown): ChatMessage {
     role,
     text: typeof value.text === 'string' ? value.text : '',
     imagePath: getNullableString(value.imagePath),
+    actions: normalizeAiActions(value.actions, {
+      createdAt: getRequiredString(value.createdAt, 'message.createdAt'),
+      createId,
+    }),
     createdAt: getRequiredString(value.createdAt, 'message.createdAt'),
     updatedAt: getRequiredString(value.updatedAt, 'message.updatedAt'),
     syncStatus:

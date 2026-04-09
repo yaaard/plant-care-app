@@ -3,11 +3,19 @@ import * as Notifications from 'expo-notifications';
 
 import { getCareTypeLabel } from '@/constants/careTypes';
 import { NOTIFICATION_CHANNEL_ID } from '@/constants/defaultValues';
-import { getNotificationDateForTask } from '@/lib/date';
+import { compareDateStrings, getNotificationDateForTask, todayString } from '@/lib/date';
 import { getSettings } from '@/lib/settings-repo';
 import { getPendingTasks } from '@/lib/tasks-repo';
+import type { CareTaskWithPlant } from '@/types/task';
 
 let notificationHandlerConfigured = false;
+
+type NotificationTaskGroup = {
+  id: string;
+  referenceDate: string;
+  triggerDate: Date;
+  tasks: CareTaskWithPlant[];
+};
 
 export function configureNotificationHandler() {
   if (notificationHandlerConfigured) {
@@ -34,7 +42,7 @@ async function ensureAndroidChannelAsync() {
   await Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL_ID, {
     name: 'Напоминания по уходу',
     importance: Notifications.AndroidImportance.DEFAULT,
-    description: 'Локальные напоминания о задачах по уходу за растениями',
+    description: 'Локальные напоминания о растениях, которым сейчас нужен уход',
   });
 }
 
@@ -64,6 +72,74 @@ export async function requestNotificationPermissionsAsync(): Promise<boolean> {
   );
 }
 
+function buildNotificationGroups(
+  pendingTasks: CareTaskWithPlant[],
+  notificationHour: number,
+  notificationMinute: number
+) {
+  const today = todayString();
+  const groups = new Map<string, NotificationTaskGroup>();
+
+  for (const task of pendingTasks) {
+    const referenceDate =
+      compareDateStrings(task.scheduledDate, today) <= 0 ? today : task.scheduledDate;
+    const triggerDate = getNotificationDateForTask(
+      referenceDate,
+      notificationHour,
+      notificationMinute
+    );
+
+    if (!triggerDate) {
+      continue;
+    }
+
+    const existingGroup = groups.get(referenceDate);
+
+    if (existingGroup) {
+      existingGroup.tasks.push(task);
+      continue;
+    }
+
+    groups.set(referenceDate, {
+      id: `care-summary-${referenceDate}`,
+      referenceDate,
+      triggerDate,
+      tasks: [task],
+    });
+  }
+
+  return Array.from(groups.values()).sort((left, right) => left.triggerDate.getTime() - right.triggerDate.getTime());
+}
+
+function buildNotificationContent(group: NotificationTaskGroup) {
+  const uniquePlantNames = Array.from(new Set(group.tasks.map((task) => task.plantName)));
+  const primaryTask = group.tasks[0];
+
+  if (group.tasks.length === 1) {
+    return {
+      title: `${primaryTask.plantName} требует внимания`,
+      body: `На сегодня запланировано: ${getCareTypeLabel(primaryTask.type).toLowerCase()}.`,
+    };
+  }
+
+  if (uniquePlantNames.length === 1) {
+    return {
+      title: `${primaryTask.plantName} требует внимания`,
+      body: `На эту дату есть ещё ${group.tasks.length - 1} задач(и) по уходу.`,
+    };
+  }
+
+  const extraPlantCount = uniquePlantNames.length - 1;
+
+  return {
+    title: 'Растения требуют внимания',
+    body:
+      extraPlantCount > 0
+        ? `${primaryTask.plantName} и ещё ${extraPlantCount} растений требуют ухода.`
+        : `${primaryTask.plantName} требует ухода.`,
+  };
+}
+
 export async function refreshScheduledNotificationsAsync() {
   configureNotificationHandler();
   await Notifications.cancelAllScheduledNotificationsAsync();
@@ -86,35 +162,31 @@ export async function refreshScheduledNotificationsAsync() {
     };
   }
 
+  const taskGroups = buildNotificationGroups(
+    pendingTasks,
+    settings.notificationHour,
+    settings.notificationMinute
+  );
+
   let scheduledCount = 0;
 
-  for (const task of pendingTasks) {
-    const triggerDate = getNotificationDateForTask(
-      task.scheduledDate,
-      settings.notificationHour,
-      settings.notificationMinute
-    );
-
-    if (!triggerDate) {
-      continue;
-    }
-
-    const careLabel = getCareTypeLabel(task.type);
+  for (const group of taskGroups) {
+    const content = buildNotificationContent(group);
 
     await Notifications.scheduleNotificationAsync({
-      identifier: task.id,
+      identifier: group.id,
       content: {
-        title: `Пора выполнить: ${careLabel}`,
-        body: `${task.plantName} (${task.plantSpecies}) требует внимания.`,
+        title: content.title,
+        body: content.body,
         data: {
-          plantId: task.plantId,
-          taskId: task.id,
-          type: task.type,
+          screen: 'schedule',
+          date: group.referenceDate,
+          plantId: group.tasks[0]?.plantId ?? null,
         },
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: triggerDate,
+        date: group.triggerDate,
         channelId: Platform.OS === 'android' ? NOTIFICATION_CHANNEL_ID : undefined,
       },
     });

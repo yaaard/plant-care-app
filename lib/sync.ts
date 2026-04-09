@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { DEFAULT_SETTINGS, LAST_SYNC_STORAGE_KEY } from '@/constants/defaultValues';
+import { normalizeAiActions, serializeAiActions } from '@/lib/ai-actions';
 import { getDatabase, nowIsoString } from '@/lib/db';
 import { initializeDatabase } from '@/lib/db-init';
 import { emitLocalDataChanged } from '@/lib/local-events';
@@ -10,6 +11,7 @@ import { refreshAllPlantCareState } from '@/lib/plants-repo';
 import { deletePlantPhoto, getPlantPhotoPublicUrl, uploadPlantPhoto } from '@/lib/storage';
 import { getSupabaseClient } from '@/lib/supabase';
 import { markRecordError, markRecordSynced } from '@/lib/sync-queue';
+import type { AiActionHistory } from '@/types/ai-action';
 import type { PlantCatalogPlant, PlantCatalogSymptom } from '@/types/plant-catalog';
 import type { AppSettings } from '@/types/settings';
 import type { SyncResult, LocalSyncOverview } from '@/types/sync';
@@ -82,6 +84,7 @@ type RemoteAiAnalysisRow = {
   light_advice: string;
   humidity_advice: string;
   recommended_actions: string[] | null;
+  actions: unknown[] | null;
   confidence_note: string;
   raw_json: Record<string, unknown> | string | null;
   created_at: string;
@@ -104,6 +107,20 @@ type RemoteChatMessageRow = {
   role: 'user' | 'assistant' | 'system';
   text: string;
   image_path: string | null;
+  actions: unknown[] | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type RemoteAiActionHistoryRow = {
+  id: string;
+  user_id: string;
+  plant_id: string | null;
+  analysis_id: string | null;
+  chat_message_id: string | null;
+  action_type: AiActionHistory['actionType'];
+  action_payload: Record<string, unknown> | string;
+  applied_at: string;
   created_at: string;
   updated_at: string;
 };
@@ -220,6 +237,7 @@ type LocalAiAnalysisRecord = {
   lightAdvice: string;
   humidityAdvice: string;
   recommendedActions: string;
+  actions: string;
   confidenceNote: string;
   rawJson: string;
   createdAt: string;
@@ -246,8 +264,23 @@ type LocalChatMessageRecord = {
   role: 'user' | 'assistant' | 'system';
   text: string;
   imagePath: string | null;
+  actions: string;
   createdAt: string;
   updatedAt: string;
+  syncStatus: string;
+  remoteUpdatedAt: string | null;
+};
+
+type LocalAiActionHistoryRecord = {
+  id: string;
+  userId: string | null;
+  plantId: string | null;
+  analysisId: string | null;
+  chatMessageId: string | null;
+  actionType: AiActionHistory['actionType'];
+  actionPayload: string;
+  appliedAt: string;
+  createdAt: string;
   syncStatus: string;
   remoteUpdatedAt: string | null;
 };
@@ -289,6 +322,25 @@ function serializeStringArray(values: string[] | null | undefined) {
       )
     )
   );
+}
+
+function serializeAiActionArray(
+  values: unknown,
+  context: Parameters<typeof normalizeAiActions>[1] = {}
+) {
+  return serializeAiActions(normalizeAiActions(values, context));
+}
+
+function serializeActionPayload(value: Record<string, unknown> | string | null | undefined) {
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+
+  if (value && typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+
+  return '{}';
 }
 
 function serializeRawJson(value: Record<string, unknown> | string | null | undefined) {
@@ -377,6 +429,18 @@ function isMissingChatTableError(
 
   return (
     message.includes(tableName) &&
+    (message.includes('does not exist') ||
+      message.includes('could not find the table') ||
+      message.includes('relation') ||
+      message.includes('schema cache'))
+  );
+}
+
+function isMissingAiActionHistoryTableError(error: { message?: string } | null | undefined) {
+  const message = error?.message?.toLowerCase() ?? '';
+
+  return (
+    message.includes('ai_action_history') &&
     (message.includes('does not exist') ||
       message.includes('could not find the table') ||
       message.includes('relation') ||
@@ -550,6 +614,7 @@ async function getLocalAiAnalyses(userId: string) {
         lightAdvice,
         humidityAdvice,
         recommendedActions,
+        actions,
         confidenceNote,
         rawJson,
         createdAt,
@@ -598,6 +663,7 @@ async function getLocalChatMessages(userId: string) {
         role,
         text,
         imagePath,
+        actions,
         createdAt,
         COALESCE(NULLIF(updatedAt, ''), createdAt) AS updatedAt,
         syncStatus,
@@ -605,6 +671,31 @@ async function getLocalChatMessages(userId: string) {
       FROM chat_messages
       WHERE userId = ?
       ORDER BY createdAt ASC
+    `,
+    userId
+  );
+}
+
+async function getLocalAiActionHistory(userId: string) {
+  const database = await getDatabase();
+
+  return database.getAllAsync<LocalAiActionHistoryRecord>(
+    `
+      SELECT
+        id,
+        userId,
+        plantId,
+        analysisId,
+        chatMessageId,
+        actionType,
+        actionPayload,
+        appliedAt,
+        createdAt,
+        syncStatus,
+        remoteUpdatedAt
+      FROM ai_action_history
+      WHERE userId = ?
+      ORDER BY appliedAt ASC, createdAt ASC
     `,
     userId
   );
@@ -685,6 +776,10 @@ export async function bindAnonymousDataToUser(userId: string) {
     SET userId = '${userId}', syncStatus = 'synced', remoteUpdatedAt = COALESCE(remoteUpdatedAt, updatedAt)
     WHERE userId IS NULL OR userId = '';
 
+    UPDATE ai_action_history
+    SET userId = '${userId}', syncStatus = 'pending', remoteUpdatedAt = NULL
+    WHERE userId IS NULL OR userId = '';
+
     UPDATE sync_deletions
     SET userId = '${userId}'
     WHERE userId IS NULL OR userId = '';
@@ -711,6 +806,7 @@ export async function clearLocalDataForSignOut() {
   await database.withTransactionAsync(async () => {
     await database.execAsync(`
       DELETE FROM sync_deletions;
+      DELETE FROM ai_action_history;
       DELETE FROM chat_messages;
       DELETE FROM chat_threads;
       DELETE FROM plant_ai_analyses;
@@ -1073,6 +1169,61 @@ async function pushLogs(userId: string) {
     } catch (error) {
       console.warn('[sync] Не удалось синхронизировать запись журнала.', log.id, error);
       await markRecordError('care_logs', log.id, database);
+    }
+  }
+
+  return pushed;
+}
+
+async function pushAiActionHistory(userId: string) {
+  const client = getSupabaseClient();
+  const database = await getDatabase();
+  const historyRecords = await getLocalAiActionHistory(userId);
+  let pushed = 0;
+
+  for (const record of historyRecords) {
+    if (record.syncStatus === 'synced') {
+      continue;
+    }
+
+    try {
+      const payload = {
+        id: record.id,
+        user_id: userId,
+        plant_id: record.plantId,
+        analysis_id: record.analysisId,
+        chat_message_id: record.chatMessageId,
+        action_type: record.actionType,
+        action_payload: safeParseMetadata(record.actionPayload),
+        applied_at: record.appliedAt,
+        created_at: record.createdAt,
+        updated_at: record.appliedAt,
+      };
+
+      const { data, error } = await client
+        .from('ai_action_history')
+        .upsert(payload, { onConflict: 'id' })
+        .select('*')
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      await markRecordSynced(
+        'ai_action_history',
+        record.id,
+        (data as RemoteAiActionHistoryRow).updated_at,
+        database
+      );
+      pushed += 1;
+    } catch (error) {
+      console.warn(
+        '[sync] Не удалось синхронизировать запись истории AI-действия.',
+        record.id,
+        error
+      );
+      await markRecordError('ai_action_history', record.id, database);
     }
   }
 
@@ -1616,15 +1767,16 @@ async function pullAiAnalyses(userId: string) {
             possibleCauses,
             wateringAdvice,
             lightAdvice,
-            humidityAdvice,
-            recommendedActions,
-            confidenceNote,
-            rawJson,
-            createdAt,
-            updatedAt,
-            syncStatus,
-            remoteUpdatedAt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          humidityAdvice,
+          recommendedActions,
+          actions,
+          confidenceNote,
+          rawJson,
+          createdAt,
+          updatedAt,
+          syncStatus,
+          remoteUpdatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         remoteAnalysis.id,
         remoteAnalysis.plant_id,
@@ -1640,6 +1792,10 @@ async function pullAiAnalyses(userId: string) {
         remoteAnalysis.light_advice,
         remoteAnalysis.humidity_advice,
         serializeStringArray(remoteAnalysis.recommended_actions),
+        serializeAiActionArray(remoteAnalysis.actions, {
+          plantId: remoteAnalysis.plant_id,
+          createdAt: remoteAnalysis.created_at,
+        }),
         remoteAnalysis.confidence_note,
         serializeRawJson(remoteAnalysis.raw_json),
         remoteAnalysis.created_at,
@@ -1683,6 +1839,7 @@ async function pullAiAnalyses(userId: string) {
           lightAdvice = ?,
           humidityAdvice = ?,
           recommendedActions = ?,
+          actions = ?,
           confidenceNote = ?,
           rawJson = ?,
           createdAt = ?,
@@ -1704,6 +1861,10 @@ async function pullAiAnalyses(userId: string) {
       remoteAnalysis.light_advice,
       remoteAnalysis.humidity_advice,
       serializeStringArray(remoteAnalysis.recommended_actions),
+      serializeAiActionArray(remoteAnalysis.actions, {
+        plantId: remoteAnalysis.plant_id,
+        createdAt: remoteAnalysis.created_at,
+      }),
       remoteAnalysis.confidence_note,
       serializeRawJson(remoteAnalysis.raw_json),
       remoteAnalysis.created_at,
@@ -1864,11 +2025,12 @@ async function pullChatMessages(userId: string) {
             role,
             text,
             imagePath,
+            actions,
             createdAt,
             updatedAt,
             syncStatus,
             remoteUpdatedAt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         remoteMessage.id,
         remoteMessage.thread_id,
@@ -1876,6 +2038,9 @@ async function pullChatMessages(userId: string) {
         remoteMessage.role,
         remoteMessage.text,
         remoteMessage.image_path,
+        serializeAiActionArray(remoteMessage.actions, {
+          createdAt: remoteMessage.created_at,
+        }),
         remoteMessage.created_at,
         remoteMessage.updated_at,
         'synced',
@@ -1909,6 +2074,7 @@ async function pullChatMessages(userId: string) {
           role = ?,
           text = ?,
           imagePath = ?,
+          actions = ?,
           createdAt = ?,
           updatedAt = ?,
           syncStatus = 'synced',
@@ -1920,6 +2086,9 @@ async function pullChatMessages(userId: string) {
       remoteMessage.role,
       remoteMessage.text,
       remoteMessage.image_path,
+      serializeAiActionArray(remoteMessage.actions, {
+        createdAt: remoteMessage.created_at,
+      }),
       remoteMessage.created_at,
       remoteMessage.updated_at,
       remoteMessage.updated_at,
@@ -1941,6 +2110,125 @@ async function pullChatMessages(userId: string) {
   return pulled;
 }
 
+async function pullAiActionHistory(userId: string) {
+  const client = getSupabaseClient();
+  const database = await getDatabase();
+  const localHistory = await getLocalAiActionHistory(userId);
+  const localHistoryMap = new Map(localHistory.map((record) => [record.id, record]));
+  const { data, error } = await client
+    .from('ai_action_history')
+    .select('*')
+    .eq('user_id', userId)
+    .order('applied_at', { ascending: true });
+
+  if (error) {
+    if (isMissingAiActionHistoryTableError(error)) {
+      console.warn(
+        '[sync] Таблица ai_action_history ещё не создана в Supabase. Pull истории AI-действий пропущен.'
+      );
+      return 0;
+    }
+
+    throw error;
+  }
+
+  const remoteHistory = (data ?? []) as RemoteAiActionHistoryRow[];
+  let pulled = 0;
+
+  for (const remoteRecord of remoteHistory) {
+    const localRecord = localHistoryMap.get(remoteRecord.id);
+
+    if (!localRecord) {
+      await database.runAsync(
+        `
+          INSERT INTO ai_action_history (
+            id,
+            userId,
+            plantId,
+            analysisId,
+            chatMessageId,
+            actionType,
+            actionPayload,
+            appliedAt,
+            createdAt,
+            syncStatus,
+            remoteUpdatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        remoteRecord.id,
+        userId,
+        remoteRecord.plant_id,
+        remoteRecord.analysis_id,
+        remoteRecord.chat_message_id,
+        remoteRecord.action_type,
+        serializeActionPayload(remoteRecord.action_payload),
+        remoteRecord.applied_at,
+        remoteRecord.created_at,
+        'synced',
+        remoteRecord.updated_at
+      );
+
+      pulled += 1;
+      continue;
+    }
+
+    if (
+      localRecord.remoteUpdatedAt === remoteRecord.updated_at &&
+      localRecord.syncStatus === 'synced'
+    ) {
+      continue;
+    }
+
+    if (
+      localRecord.syncStatus === 'pending' &&
+      !isRemoteNewer(remoteRecord.updated_at, localRecord.appliedAt)
+    ) {
+      continue;
+    }
+
+    await database.runAsync(
+      `
+        UPDATE ai_action_history
+        SET
+          userId = ?,
+          plantId = ?,
+          analysisId = ?,
+          chatMessageId = ?,
+          actionType = ?,
+          actionPayload = ?,
+          appliedAt = ?,
+          createdAt = ?,
+          syncStatus = 'synced',
+          remoteUpdatedAt = ?
+        WHERE id = ?
+      `,
+      userId,
+      remoteRecord.plant_id,
+      remoteRecord.analysis_id,
+      remoteRecord.chat_message_id,
+      remoteRecord.action_type,
+      serializeActionPayload(remoteRecord.action_payload),
+      remoteRecord.applied_at,
+      remoteRecord.created_at,
+      remoteRecord.updated_at,
+      remoteRecord.id
+    );
+
+    pulled += 1;
+  }
+
+  const remoteIds = new Set(remoteHistory.map((item) => item.id));
+
+  for (const localRecord of localHistory) {
+    if (!remoteIds.has(localRecord.id) && localRecord.syncStatus === 'synced') {
+      await database.runAsync('DELETE FROM ai_action_history WHERE id = ?', localRecord.id);
+      pulled += 1;
+    }
+  }
+
+  return pulled;
+}
+
 export async function syncAllForCurrentUser(): Promise<SyncResult> {
   await initializeDatabase();
 
@@ -1950,12 +2238,14 @@ export async function syncAllForCurrentUser(): Promise<SyncResult> {
   const pushedPlants = await pushPlants(userId);
   const pushedTasks = await pushTasks(userId);
   const pushedLogs = await pushLogs(userId);
+  const pushedAiActionHistory = await pushAiActionHistory(userId);
   const pulledPlants = await pullPlants(userId);
   const pulledTasks = await pullTasks(userId);
   const pulledLogs = await pullLogs(userId);
   const pulledAiAnalyses = await pullAiAnalyses(userId);
   const pulledChatThreads = await pullChatThreads(userId);
   const pulledChatMessages = await pullChatMessages(userId);
+  const pulledAiActionHistory = await pullAiActionHistory(userId);
   const pulledSettings = await pullSettings(userId);
   const pulledCatalog = await syncPlantCatalogForCurrentUser();
 
@@ -1968,7 +2258,13 @@ export async function syncAllForCurrentUser(): Promise<SyncResult> {
 
   return {
     finishedAt,
-    pushed: pushedDeletions + pushedSettings + pushedPlants + pushedTasks + pushedLogs,
+    pushed:
+      pushedDeletions +
+      pushedSettings +
+      pushedPlants +
+      pushedTasks +
+      pushedLogs +
+      pushedAiActionHistory,
     pulled:
       pulledPlants +
       pulledTasks +
@@ -1978,6 +2274,7 @@ export async function syncAllForCurrentUser(): Promise<SyncResult> {
       pulledAiAnalyses +
       pulledChatThreads +
       pulledChatMessages +
+      pulledAiActionHistory +
       pulledSettings,
   };
 }

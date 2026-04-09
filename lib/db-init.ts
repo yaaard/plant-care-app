@@ -220,6 +220,10 @@ async function ensureAiAnalysisColumns() {
       sql: "ALTER TABLE plant_ai_analyses ADD COLUMN recommendedActions TEXT NOT NULL DEFAULT '[]'",
     },
     {
+      name: 'actions',
+      sql: "ALTER TABLE plant_ai_analyses ADD COLUMN actions TEXT NOT NULL DEFAULT '[]'",
+    },
+    {
       name: 'confidenceNote',
       sql: "ALTER TABLE plant_ai_analyses ADD COLUMN confidenceNote TEXT NOT NULL DEFAULT ''",
     },
@@ -316,6 +320,10 @@ async function ensureChatMessageColumns() {
       sql: 'ALTER TABLE chat_messages ADD COLUMN imagePath TEXT',
     },
     {
+      name: 'actions',
+      sql: "ALTER TABLE chat_messages ADD COLUMN actions TEXT NOT NULL DEFAULT '[]'",
+    },
+    {
       name: 'createdAt',
       sql: `ALTER TABLE chat_messages ADD COLUMN createdAt TEXT NOT NULL DEFAULT '${nowIsoString()}'`,
     },
@@ -330,6 +338,60 @@ async function ensureChatMessageColumns() {
     {
       name: 'remoteUpdatedAt',
       sql: 'ALTER TABLE chat_messages ADD COLUMN remoteUpdatedAt TEXT',
+    },
+  ];
+
+  for (const column of nextColumns) {
+    if (!columnNames.has(column.name)) {
+      await database.execAsync(column.sql);
+    }
+  }
+}
+
+async function ensureAiActionHistoryColumns() {
+  const database = await getDatabase();
+  const columnNames = await getColumnNames('ai_action_history');
+
+  const nextColumns = [
+    {
+      name: 'userId',
+      sql: 'ALTER TABLE ai_action_history ADD COLUMN userId TEXT',
+    },
+    {
+      name: 'plantId',
+      sql: 'ALTER TABLE ai_action_history ADD COLUMN plantId TEXT',
+    },
+    {
+      name: 'analysisId',
+      sql: 'ALTER TABLE ai_action_history ADD COLUMN analysisId TEXT',
+    },
+    {
+      name: 'chatMessageId',
+      sql: 'ALTER TABLE ai_action_history ADD COLUMN chatMessageId TEXT',
+    },
+    {
+      name: 'actionType',
+      sql: "ALTER TABLE ai_action_history ADD COLUMN actionType TEXT NOT NULL DEFAULT 'dismiss'",
+    },
+    {
+      name: 'actionPayload',
+      sql: "ALTER TABLE ai_action_history ADD COLUMN actionPayload TEXT NOT NULL DEFAULT '{}'",
+    },
+    {
+      name: 'appliedAt',
+      sql: `ALTER TABLE ai_action_history ADD COLUMN appliedAt TEXT NOT NULL DEFAULT '${nowIsoString()}'`,
+    },
+    {
+      name: 'createdAt',
+      sql: `ALTER TABLE ai_action_history ADD COLUMN createdAt TEXT NOT NULL DEFAULT '${nowIsoString()}'`,
+    },
+    {
+      name: 'syncStatus',
+      sql: "ALTER TABLE ai_action_history ADD COLUMN syncStatus TEXT NOT NULL DEFAULT 'pending'",
+    },
+    {
+      name: 'remoteUpdatedAt',
+      sql: 'ALTER TABLE ai_action_history ADD COLUMN remoteUpdatedAt TEXT',
     },
   ];
 
@@ -378,6 +440,13 @@ async function ensureDefaultSyncValues() {
       updatedAt = COALESCE(NULLIF(updatedAt, ''), createdAt),
       syncStatus = COALESCE(NULLIF(syncStatus, ''), 'synced')
     WHERE updatedAt IS NULL OR updatedAt = '' OR syncStatus IS NULL OR syncStatus = '';
+
+    UPDATE ai_action_history
+    SET
+      appliedAt = COALESCE(NULLIF(appliedAt, ''), createdAt),
+      createdAt = COALESCE(NULLIF(createdAt, ''), '${now}'),
+      syncStatus = COALESCE(NULLIF(syncStatus, ''), 'pending')
+    WHERE appliedAt IS NULL OR appliedAt = '' OR createdAt IS NULL OR createdAt = '' OR syncStatus IS NULL OR syncStatus = '';
   `);
 
   await database.runAsync(
@@ -387,6 +456,18 @@ async function ensureDefaultSyncValues() {
         updatedAt = COALESCE(NULLIF(updatedAt, ''), ?),
         syncStatus = COALESCE(NULLIF(syncStatus, ''), 'pending')
       WHERE updatedAt IS NULL OR updatedAt = '' OR syncStatus IS NULL OR syncStatus = ''
+    `,
+    now
+  );
+
+  await database.runAsync(
+    `
+      UPDATE ai_action_history
+      SET
+        appliedAt = COALESCE(NULLIF(appliedAt, ''), createdAt),
+        createdAt = COALESCE(NULLIF(createdAt, ''), ?),
+        syncStatus = COALESCE(NULLIF(syncStatus, ''), 'pending')
+      WHERE appliedAt IS NULL OR appliedAt = '' OR createdAt IS NULL OR createdAt = '' OR syncStatus IS NULL OR syncStatus = ''
     `,
     now
   );
@@ -429,6 +510,12 @@ async function ensureIndexes() {
     CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(threadId);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_user_id ON chat_messages(userId);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(createdAt);
+
+    CREATE INDEX IF NOT EXISTS idx_ai_action_history_user_id ON ai_action_history(userId);
+    CREATE INDEX IF NOT EXISTS idx_ai_action_history_plant_id ON ai_action_history(plantId);
+    CREATE INDEX IF NOT EXISTS idx_ai_action_history_analysis_id ON ai_action_history(analysisId);
+    CREATE INDEX IF NOT EXISTS idx_ai_action_history_chat_message_id ON ai_action_history(chatMessageId);
+    CREATE INDEX IF NOT EXISTS idx_ai_action_history_applied_at ON ai_action_history(appliedAt);
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_care_task
     ON care_tasks(plantId, type, scheduledDate)
@@ -535,6 +622,7 @@ export async function initializeDatabase(): Promise<void> {
           lightAdvice TEXT NOT NULL DEFAULT '',
           humidityAdvice TEXT NOT NULL DEFAULT '',
           recommendedActions TEXT NOT NULL DEFAULT '[]',
+          actions TEXT NOT NULL DEFAULT '[]',
           confidenceNote TEXT NOT NULL DEFAULT '',
           rawJson TEXT NOT NULL DEFAULT '{}',
           createdAt TEXT NOT NULL,
@@ -563,11 +651,29 @@ export async function initializeDatabase(): Promise<void> {
           role TEXT NOT NULL,
           text TEXT NOT NULL DEFAULT '',
           imagePath TEXT,
+          actions TEXT NOT NULL DEFAULT '[]',
           createdAt TEXT NOT NULL,
           updatedAt TEXT NOT NULL,
           syncStatus TEXT NOT NULL DEFAULT 'synced',
           remoteUpdatedAt TEXT,
           FOREIGN KEY (threadId) REFERENCES chat_threads(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS ai_action_history (
+          id TEXT PRIMARY KEY NOT NULL,
+          userId TEXT,
+          plantId TEXT,
+          analysisId TEXT,
+          chatMessageId TEXT,
+          actionType TEXT NOT NULL,
+          actionPayload TEXT NOT NULL DEFAULT '{}',
+          appliedAt TEXT NOT NULL,
+          createdAt TEXT NOT NULL,
+          syncStatus TEXT NOT NULL DEFAULT 'pending',
+          remoteUpdatedAt TEXT,
+          FOREIGN KEY (plantId) REFERENCES plants(id) ON DELETE SET NULL,
+          FOREIGN KEY (analysisId) REFERENCES plant_ai_analyses(id) ON DELETE SET NULL,
+          FOREIGN KEY (chatMessageId) REFERENCES chat_messages(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS plant_catalog (
@@ -616,6 +722,7 @@ export async function initializeDatabase(): Promise<void> {
       await ensureAiAnalysisColumns();
       await ensureChatThreadColumns();
       await ensureChatMessageColumns();
+      await ensureAiActionHistoryColumns();
       await ensureDefaultSyncValues();
       await ensureIndexes();
 

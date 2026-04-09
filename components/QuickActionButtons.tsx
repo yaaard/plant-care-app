@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AppTheme } from '@/constants/theme';
 import { getCareTypeLabel } from '@/constants/careTypes';
 import type { CareTask } from '@/types/task';
 
@@ -50,8 +51,8 @@ const styles = StyleSheet.create({
   },
   button: {
     alignItems: 'center',
-    backgroundColor: '#edf7ef',
-    borderRadius: 12,
+    backgroundColor: AppTheme.colors.primarySoft,
+    borderRadius: AppTheme.radius.lg,
     justifyContent: 'center',
     minHeight: 46,
     paddingHorizontal: 14,
@@ -60,7 +61,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#dfeae2',
   },
   buttonText: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
     fontSize: 14,
     fontWeight: '700',
   },

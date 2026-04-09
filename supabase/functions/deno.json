@@ -1,4 +1,14 @@
 {
+  "imports": {
+    "@/constants/careTypes": "../../constants/careTypes.ts",
+    "@/shared/ai-action-schema": "../../shared/ai-action-schema.ts",
+    "@/shared/assistant-chat-schema": "../../shared/assistant-chat-schema.ts",
+    "@/shared/plant-ai-analysis-schema": "../../shared/plant-ai-analysis-schema.ts",
+    "@/types/ai-action": "../../types/ai-action.ts",
+    "@/types/risk": "../../types/risk.ts",
+    "@/types/sync": "../../types/sync.ts",
+    "@/types/task": "../../types/task.ts"
+  },
   "compilerOptions": {
     "lib": ["deno.window"]
   }

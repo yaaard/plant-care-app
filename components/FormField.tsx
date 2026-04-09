@@ -1,6 +1,8 @@
 import type { KeyboardTypeOptions, TextInputProps } from 'react-native';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { AppTheme } from '@/constants/theme';
+
 type FormFieldProps = {
   label: string;
   value: string;
@@ -10,7 +12,15 @@ type FormFieldProps = {
   multiline?: boolean;
   keyboardType?: KeyboardTypeOptions;
   autoCapitalize?: TextInputProps['autoCapitalize'];
-} & Pick<TextInputProps, 'editable' | 'maxLength' | 'secureTextEntry'>;
+} & Pick<
+  TextInputProps,
+  | 'blurOnSubmit'
+  | 'editable'
+  | 'maxLength'
+  | 'onSubmitEditing'
+  | 'returnKeyType'
+  | 'secureTextEntry'
+>;
 
 export function FormField({
   label,
@@ -23,7 +33,10 @@ export function FormField({
   autoCapitalize = 'sentences',
   editable = true,
   maxLength,
+  onSubmitEditing,
+  returnKeyType,
   secureTextEntry,
+  blurOnSubmit,
 }: FormFieldProps) {
   return (
     <View style={styles.container}>
@@ -35,12 +48,15 @@ export function FormField({
         maxLength={maxLength}
         multiline={multiline}
         onChangeText={onChangeText}
+        onSubmitEditing={onSubmitEditing}
         placeholder={placeholder}
-        placeholderTextColor="#8a948c"
+        placeholderTextColor={AppTheme.colors.textSoft}
+        returnKeyType={returnKeyType}
         secureTextEntry={secureTextEntry}
         style={[styles.input, multiline && styles.multilineInput, !editable && styles.disabledInput]}
         textAlignVertical={multiline ? 'top' : 'center'}
         value={value}
+        blurOnSubmit={blurOnSubmit ?? !multiline}
       />
       {helperText ? <Text style={styles.helperText}>{helperText}</Text> : null}
     </View>
@@ -52,31 +68,33 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   label: {
-    color: '#163020',
-    fontSize: 14,
-    fontWeight: '600',
+    color: AppTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
     marginBottom: 8,
+    textTransform: 'uppercase',
   },
   input: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 14,
+    backgroundColor: AppTheme.colors.surfaceElevated,
+    borderColor: AppTheme.colors.strokeStrong,
+    borderRadius: AppTheme.radius.lg,
     borderWidth: 1,
-    color: '#163020',
+    color: AppTheme.colors.text,
     fontSize: 16,
-    minHeight: 48,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    minHeight: 52,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
   },
   multilineInput: {
-    minHeight: 108,
+    minHeight: 116,
   },
   helperText: {
-    color: '#667085',
+    color: AppTheme.colors.textMuted,
     fontSize: 12,
     marginTop: 6,
   },
   disabledInput: {
-    backgroundColor: '#f0f3ef',
+    backgroundColor: AppTheme.colors.surfaceMuted,
   },
 });

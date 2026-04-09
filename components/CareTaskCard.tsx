@@ -1,6 +1,8 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { RiskBadge } from '@/components/RiskBadge';
+import { AppTheme } from '@/constants/theme';
 import { formatCareType, formatTaskDate } from '@/lib/formatters';
 import { isDateBeforeToday } from '@/lib/date';
 import type { CareTask, CareTaskWithPlant } from '@/types/task';
@@ -25,33 +27,69 @@ export function CareTaskCard({
   completing = false,
 }: CareTaskCardProps) {
   const overdue = task.isCompleted === 0 && isDateBeforeToday(task.scheduledDate);
+  const statusLabel = task.isCompleted ? 'Выполнено' : overdue ? 'Просрочено' : 'Активно';
 
   return (
-    <View style={[styles.card, overdue && styles.overdueCard]}>
+    <View style={[styles.card, overdue && styles.cardOverdue]}>
       <Pressable
         disabled={!onPress}
         onPress={onPress}
-        style={({ pressed }) => [pressed && onPress && styles.pressed]}
+        style={({ pressed }) => [styles.body, pressed && onPress && styles.pressed]}
       >
-        <View style={styles.header}>
-          <Text style={styles.title}>{formatCareType(task.type)}</Text>
-          <Text style={[styles.status, overdue && styles.overdueStatus]}>
-            {task.isCompleted ? 'Выполнено' : overdue ? 'Просрочено' : 'Активно'}
-          </Text>
+        <View style={styles.headerRow}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.kicker}>Уход</Text>
+            <Text style={styles.title}>{formatCareType(task.type)}</Text>
+          </View>
+          <View style={[styles.statusChip, overdue && styles.statusChipOverdue]}>
+            <Text style={[styles.statusText, overdue && styles.statusTextOverdue]}>{statusLabel}</Text>
+          </View>
         </View>
 
-        {showPlantName && hasPlantInfo(task) ? (
-          <View style={styles.plantRow}>
-            <View style={styles.plantMeta}>
-              <Text style={styles.plantName}>{task.plantName}</Text>
-              <Text style={styles.plantSpecies}>{task.plantSpecies}</Text>
-            </View>
-            <RiskBadge compact level={task.plantRiskLevel} />
-          </View>
-        ) : null}
+        <View style={styles.infoRow}>
+          {showPlantName && hasPlantInfo(task) ? (
+            <View style={styles.taskRow}>
+              {task.plantPhotoUri ? (
+                <Image source={{ uri: task.plantPhotoUri }} style={styles.thumbnail} />
+              ) : (
+                <View style={styles.thumbnailPlaceholder}>
+                  <Ionicons color={AppTheme.colors.primaryStrong} name="leaf-outline" size={20} />
+                </View>
+              )}
 
-        <Text style={styles.dateLabel}>Срок выполнения</Text>
-        <Text style={styles.dateValue}>{formatTaskDate(task.scheduledDate)}</Text>
+              <View style={styles.taskRowBody}>
+                <View style={styles.dateBlock}>
+                  <Ionicons color={AppTheme.colors.primaryStrong} name="calendar-outline" size={16} />
+                  <View style={styles.dateCopy}>
+                    <Text style={styles.dateLabel}>Запланировано</Text>
+                    <Text style={styles.dateValue}>{formatTaskDate(task.scheduledDate)}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.plantSummary}>
+                  <View style={styles.plantCopy}>
+                    <Text numberOfLines={1} style={styles.plantName}>
+                      {task.plantName}
+                    </Text>
+                    <Text numberOfLines={1} style={styles.plantSpecies}>
+                      {task.plantSpecies}
+                    </Text>
+                  </View>
+                  <RiskBadge compact level={task.plantRiskLevel} />
+                </View>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.dateBlock}>
+              <Ionicons color={AppTheme.colors.primaryStrong} name="calendar-outline" size={16} />
+              <View style={styles.dateCopy}>
+                <Text style={styles.dateLabel}>Запланировано</Text>
+                <Text style={styles.dateValue}>{formatTaskDate(task.scheduledDate)}</Text>
+              </View>
+            </View>
+          )}
+
+        </View>
 
         {task.isCompleted && task.completedAt ? (
           <Text style={styles.completedText}>Завершено: {task.completedAt.slice(0, 10)}</Text>
@@ -79,87 +117,150 @@ export function CareTaskCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d5ddd2',
-    borderRadius: 18,
+    ...AppTheme.shadow.card,
+    backgroundColor: AppTheme.colors.surfaceElevated,
+    borderColor: AppTheme.colors.stroke,
+    borderRadius: 24,
     borderWidth: 1,
-    marginBottom: 12,
-    padding: 16,
+    marginBottom: 14,
+    overflow: 'hidden',
   },
-  overdueCard: {
-    backgroundColor: '#fff7f1',
-    borderColor: '#f5c6a5',
+  cardOverdue: {
+    borderColor: '#f1c8ae',
+  },
+  body: {
+    padding: AppTheme.spacing.card,
   },
   pressed: {
-    opacity: 0.92,
+    opacity: 0.94,
   },
-  header: {
-    alignItems: 'center',
+  headerRow: {
+    alignItems: 'flex-start',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: AppTheme.spacing.md,
+  },
+  headerCopy: {
+    flex: 1,
+    marginRight: AppTheme.spacing.sm,
+  },
+  kicker: {
+    color: AppTheme.colors.textSoft,
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+    textTransform: 'uppercase',
   },
   title: {
-    color: '#163020',
-    fontSize: 17,
-    fontWeight: '700',
+    color: AppTheme.colors.text,
+    fontSize: 19,
+    fontWeight: '800',
   },
-  status: {
-    color: '#2f6f3e',
+  statusChip: {
+    backgroundColor: AppTheme.colors.primarySoft,
+    borderRadius: AppTheme.radius.pill,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  statusChipOverdue: {
+    backgroundColor: AppTheme.colors.accentSoft,
+  },
+  statusText: {
+    color: AppTheme.colors.primaryStrong,
     fontSize: 12,
     fontWeight: '700',
   },
-  overdueStatus: {
-    color: '#c2410c',
+  statusTextOverdue: {
+    color: '#a65a2c',
   },
-  plantRow: {
-    alignItems: 'center',
+  infoRow: {
+    gap: AppTheme.spacing.sm,
+  },
+  taskRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
+    gap: AppTheme.spacing.sm,
   },
-  plantMeta: {
+  thumbnail: {
+    borderRadius: 16,
+    height: 56,
+    width: 56,
+  },
+  thumbnailPlaceholder: {
+    alignItems: 'center',
+    backgroundColor: AppTheme.colors.primarySoft,
+    borderRadius: 16,
+    height: 56,
+    justifyContent: 'center',
+    width: 56,
+  },
+  taskRowBody: {
     flex: 1,
-    marginRight: 12,
+    gap: 10,
   },
-  plantName: {
-    color: '#163020',
-    fontSize: 14,
-    fontWeight: '600',
+  dateBlock: {
+    alignItems: 'center',
+    backgroundColor: AppTheme.colors.surfaceMuted,
+    borderRadius: 18,
+    flexDirection: 'row',
+    gap: AppTheme.spacing.xs,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
-  plantSpecies: {
-    color: '#667085',
-    fontSize: 13,
-    marginTop: 2,
+  dateCopy: {
+    flex: 1,
   },
   dateLabel: {
-    color: '#667085',
-    fontSize: 13,
-    marginBottom: 4,
+    color: AppTheme.colors.textSoft,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   dateValue: {
-    color: '#163020',
-    fontSize: 15,
-    fontWeight: '600',
+    color: AppTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  plantSummary: {
+    alignItems: 'center',
+    backgroundColor: AppTheme.colors.surfaceSoft,
+    borderRadius: 18,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  plantCopy: {
+    flex: 1,
+    marginRight: AppTheme.spacing.sm,
+  },
+  plantName: {
+    color: AppTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  plantSpecies: {
+    color: AppTheme.colors.textMuted,
+    fontSize: 12,
+    marginTop: 3,
   },
   completedText: {
-    color: '#667085',
+    color: AppTheme.colors.textSoft,
     fontSize: 12,
-    marginTop: 8,
+    marginTop: AppTheme.spacing.sm,
   },
   completeButton: {
     alignItems: 'center',
-    backgroundColor: '#edf7ef',
-    borderRadius: 12,
+    backgroundColor: AppTheme.colors.primarySoft,
     justifyContent: 'center',
-    marginTop: 14,
-    minHeight: 44,
+    minHeight: 50,
+    paddingHorizontal: AppTheme.spacing.md,
   },
   completeButtonDisabled: {
-    backgroundColor: '#dfeae2',
+    backgroundColor: '#dfe6df',
   },
   completeButtonText: {
-    color: '#2f6f3e',
+    color: AppTheme.colors.primaryStrong,
     fontSize: 14,
     fontWeight: '700',
   },

@@ -1,4 +1,5 @@
 import type { SyncStatus } from '@/types/sync';
+import type { AiAction } from '@/types/ai-action';
 
 export type ChatRole = 'user' | 'assistant' | 'system';
 
@@ -26,6 +27,7 @@ export interface ChatMessage {
   role: ChatRole;
   text: string;
   imagePath: string | null;
+  actions: AiAction[];
   createdAt: string;
   updatedAt: string;
   syncStatus?: SyncStatus;

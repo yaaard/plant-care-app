@@ -5,9 +5,14 @@ create table if not exists public.chat_messages (
   role text not null check (role in ('user', 'assistant', 'system')),
   text text not null default '',
   image_path text,
+  actions jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+alter table public.chat_messages
+add column if not exists actions jsonb not null default '[]'::jsonb;
+
 
 create index if not exists idx_chat_messages_thread_id
 on public.chat_messages(thread_id);
